@@ -15,9 +15,21 @@ import { CATEGORIES, MEAL_SUBCATEGORIES } from "../src/categorize.js";
  */
 
 const token = process.env.NOTION_TOKEN;
-const parent = process.env.NOTION_PARENT_PAGE_ID;
+const parentRaw = process.env.NOTION_PARENT_PAGE_ID;
 if (!token) throw new Error("NOTION_TOKEN not set");
-if (!parent) throw new Error("NOTION_PARENT_PAGE_ID not set");
+if (!parentRaw) throw new Error("NOTION_PARENT_PAGE_ID not set");
+
+// Accept a raw id, a dashed UUID, or a full Notion URL — extract the page id.
+function extractPageId(input: string): string {
+  // Match a dashed UUID or a bare 32-hex run (Notion ids), ignoring the rest.
+  const match = input.match(
+    /[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}/i
+  );
+  if (!match) throw new Error(`Could not find a page id in: ${input}`);
+  const id = match[0].replace(/-/g, "");
+  return `${id.slice(0, 8)}-${id.slice(8, 12)}-${id.slice(12, 16)}-${id.slice(16, 20)}-${id.slice(20)}`;
+}
+const parent = extractPageId(parentRaw);
 
 const notion = new Client({ auth: token, notionVersion: "2025-09-03" });
 

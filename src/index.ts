@@ -9,6 +9,33 @@ import { pool } from "./db/pool.js";
  * everything. Routes and the scheduler are registered by their own modules as
  * they are built out across phases.
  */
+const PRIVACY_HTML = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Home-Agent — Privacy Policy</title>
+<style>body{font-family:system-ui,sans-serif;max-width:720px;margin:40px auto;padding:0 20px;line-height:1.6;color:#222}h1{font-size:1.6rem}h2{font-size:1.1rem;margin-top:1.6em}small{color:#666}</style>
+</head><body>
+<h1>Home-Agent — Privacy Policy</h1>
+<p><small>Last updated: 2026. Contact: sid.317@gmail.com</small></p>
+<p>Home-Agent is a private personal assistant used by a single household (two authorized users)
+over WhatsApp. It is not a public service and does not onboard other users.</p>
+<h2>What we process</h2>
+<p>When an authorized user messages the assistant, we process the message text and, for voice notes,
+a text transcript of the audio. <strong>Raw audio is never stored</strong> — it is transcribed and
+immediately discarded. Messages from unrecognized numbers are rejected and not stored.</p>
+<h2>How it is used</h2>
+<p>Message text is used solely to provide the assistant's features for the two users: categorizing and
+saving notes, semantic search over past notes, creating calendar events and reminders, and scheduling
+messages. Data is stored in the users' own Notion workspace and a private database, and is processed by
+AI providers (Anthropic, Sarvam, Voyage) only to deliver these features.</p>
+<h2>Sharing</h2>
+<p>We do not sell or share personal data with third parties for advertising. Data is shared with the
+service providers above only as needed to operate the assistant.</p>
+<h2>Retention & deletion</h2>
+<p>Notes persist until deleted by the users. To delete data or ask questions, contact
+<a href="mailto:sid.317@gmail.com">sid.317@gmail.com</a>.</p>
+</body></html>`;
+
 export async function buildServer() {
   const app = Fastify({
     logger: false,
@@ -26,6 +53,12 @@ export async function buildServer() {
       db = "down";
     }
     return { ok: true, db, tz: config.TIMEZONE };
+  });
+
+  // Privacy policy — Meta requires a valid Privacy Policy URL to take the app
+  // Live. Served from the app itself so there's no external host to maintain.
+  app.get("/privacy", async (_req, reply) => {
+    reply.type("text/html").send(PRIVACY_HTML);
   });
 
   // Phase 2+: registerWebhookRoutes(app)
