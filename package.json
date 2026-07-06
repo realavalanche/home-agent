@@ -1,0 +1,38 @@
+{
+  "name": "home-agent",
+  "version": "1.0.0",
+  "description": "Bilingual (English/Hindi/Hinglish) WhatsApp personal assistant for two users, backed by Claude, Sarvam, Notion, Google, and Postgres.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && cp src/db/schema.sql dist/src/db/schema.sql",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/src/index.js",
+    "migrate": "tsx src/db/migrate.ts",
+    "setup:notion": "tsx scripts/setup-notion.ts",
+    "auth:google": "tsx scripts/google-auth.ts",
+    "test:webhook": "tsx scripts/send-test-webhook.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.110.0",
+    "@notionhq/client": "^5.22.0",
+    "dotenv": "^17.2.3",
+    "fastify": "^5.9.0",
+    "googleapis": "^173.0.0",
+    "luxon": "^3.7.2",
+    "pg": "^8.16.3",
+    "pg-boss": "^12.25.1",
+    "voyageai": "^0.4.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/luxon": "^3.7.1",
+    "@types/node": "^24.7.0",
+    "@types/pg": "^8.15.5",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,0 +1,33 @@
+# Local dev stack: Postgres (with pgvector) + the app.
+# `docker compose up` boots both; the app waits for Postgres to be healthy.
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: homeagent
+      POSTGRES_PASSWORD: homeagent
+      POSTGRES_DB: homeagent
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U homeagent"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build: .
+    env_file: .env
+    environment:
+      # Inside compose the app reaches Postgres by service name.
+      DATABASE_URL: postgres://homeagent:homeagent@db:5432/homeagent
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

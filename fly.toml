@@ -1,0 +1,30 @@
+# Fly.io deploy config. One always-on machine runs the web server + worker.
+# Postgres is provisioned separately (see README): `fly postgres create` then
+# `fly postgres attach` sets DATABASE_URL. Use the pgvector-enabled image, or run
+# `CREATE EXTENSION vector` — Fly Postgres supports pgvector.
+app = "home-agent"
+primary_region = "bom" # Mumbai — closest to IST users
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8080"
+  TIMEZONE = "Asia/Kolkata"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false   # must stay up for cron + delayed sends
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    method = "GET"
+    path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

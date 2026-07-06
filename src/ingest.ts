@@ -1,0 +1,85 @@
+import { logger } from "./logger.js";
+import type { IngestJob } from "./queue.js";
+import { identifyUser } from "./users.js";
+import { downloadMedia } from "./whatsapp/media.js";
+import { transcribe } from "./transcribe/sarvam.js";
+import { sendText, markRead } from "./whatsapp/client.js";
+import { runAgent } from "./agent/run.js";
+import type { AgentContext } from "./agent/tools.js";
+
+// If the agent is slower than this, we send a quick ack first (requirement:
+// reply within ~15s, ack immediately if slower).
+const ACK_AFTER_MS = 3000;
+
+/**
+ * Process one inbound WhatsApp message end to end:
+ * identify sender → (transcribe if voice) → run agent → reply in same language.
+ * Unknown senders get a polite rejection and nothing is stored.
+ */
+export async function processIngest(job: IngestJob): Promise<void> {
+  const user = identifyUser(job.fromPhone);
+  if (!user) {
+    await sendText(
+      job.fromPhone,
+      "Hi! This is a private family assistant and I don't recognise this number, so I can't help here. 🙏"
+    );
+    return;
+  }
+
+  await markRead(job.waMessageId).catch(() => {});
+
+  // Resolve the message to text (transcribe voice notes; never persist audio).
+  let transcript: string;
+  let language = "en-IN";
+  let source: "voice" | "text";
+  if (job.type === "audio" && job.mediaId) {
+    source = "voice";
+    const media = await downloadMedia(job.mediaId);
+    const t = await transcribe(media);
+    transcript = t.text;
+    language = t.languageCode;
+    if (!transcript) {
+      await sendText(user.whatsapp, "Sorry, I couldn't make out that voice note — could you resend it?");
+      return;
+    }
+  } else {
+    source = "text";
+    transcript = job.text ?? "";
+    language = looksHindi(transcript) ? "hi-IN" : "en-IN";
+  }
+
+  const ctx: AgentContext = {
+    user,
+    waMessageId: job.waMessageId,
+    transcript,
+    language,
+    source,
+  };
+
+  // Ack if the agent is taking a while, so the user isn't left hanging.
+  let acked = false;
+  const ackTimer = setTimeout(() => {
+    acked = true;
+    void sendText(user.whatsapp, language.startsWith("hi") ? "Mil gaya, dekh raha hoon… ⏳" : "Got it, on it… ⏳");
+  }, ACK_AFTER_MS);
+
+  try {
+    const reply = await runAgent(ctx);
+    clearTimeout(ackTimer);
+    await sendText(user.whatsapp, reply);
+  } catch (err) {
+    clearTimeout(ackTimer);
+    logger.error("agent run failed", { err: String(err), waMessageId: job.waMessageId });
+    await sendText(
+      user.whatsapp,
+      language.startsWith("hi") ? "Arre, kuch gadbad ho gayi. Thodi der baad try karein? 🙏" : "Something went wrong on my end — mind trying again? 🙏"
+    );
+  }
+  void acked; // (ack is best-effort; final reply always follows)
+}
+
+/** Cheap heuristic: Devanagari or common Roman-Hindi tokens → treat as Hindi. */
+function looksHindi(text: string): boolean {
+  if (/[ऀ-ॿ]/.test(text)) return true;
+  return /\b(hai|nahi|kya|karo|kal|mujhe|chahiye|karna|bhej|yaad)\b/i.test(text);
+}
