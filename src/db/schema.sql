@@ -27,6 +27,18 @@ CREATE INDEX IF NOT EXISTS captures_embedding_idx
 CREATE INDEX IF NOT EXISTS captures_author_created_idx
   ON captures (author_key, created_at DESC);
 
+-- Short-term conversation memory so the agent can follow a multi-message thread
+-- (e.g. "message Arpita" → later a number → later the text). One row per turn.
+CREATE TABLE IF NOT EXISTS conversation_turns (
+  id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  author_key  TEXT NOT NULL,
+  role        TEXT NOT NULL,   -- 'user' | 'assistant'
+  content     TEXT NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS conversation_turns_author_idx
+  ON conversation_turns (author_key, created_at DESC);
+
 -- Per-user Google OAuth tokens (two users). Stores the refresh token so we can
 -- act on their calendar/gmail without re-consent.
 CREATE TABLE IF NOT EXISTS google_tokens (

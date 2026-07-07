@@ -4,6 +4,7 @@ import { logger } from "../logger.js";
 import { buildSystemPrompt } from "./prompts.js";
 import { TOOLS, runTool, type AgentContext } from "./tools.js";
 import { latestPendingConfirmation } from "../scheduler/schedule.js";
+import { loadRecentTurns, saveTurns } from "../memory.js";
 
 const anthropic = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
 
@@ -20,10 +21,28 @@ export async function runAgent(ctx: AgentContext): Promise<string> {
     : undefined;
 
   const system = buildSystemPrompt(ctx.user, pendingDesc);
+
+  // Replay recent conversation turns so the agent can follow a multi-message
+  // thread, then add the new message.
+  const history = await loadRecentTurns(ctx.user.key);
   const messages: Anthropic.MessageParam[] = [
+    ...history.map((t) => ({ role: t.role, content: t.content }) as Anthropic.MessageParam),
     { role: "user", content: ctx.transcript },
   ];
 
+  const reply = await runLoop(ctx, system, messages);
+
+  // Persist this exchange as the newest turns (best-effort).
+  await saveTurns(ctx.user.key, ctx.transcript, reply).catch(() => {});
+  return reply;
+}
+
+/** The tool-using loop. Returns the final reply text. */
+async function runLoop(
+  ctx: AgentContext,
+  system: string,
+  messages: Anthropic.MessageParam[]
+): Promise<string> {
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     const res = await anthropic.messages.create({
       model: config.CLAUDE_AGENT_MODEL,
