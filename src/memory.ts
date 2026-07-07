@@ -10,8 +10,11 @@ import type { AuthorKey } from "./users.js";
  * Bounded by a turn count + time window so token cost stays small and stale,
  * unrelated context doesn't leak into a fresh conversation.
  */
-const MAX_TURNS = 20;
-const WINDOW_MINUTES = 180;
+// Kept tight: enough to follow an active back-and-forth (give a name, then a
+// number, then the text), but short enough that older, already-handled items
+// don't linger in context and get re-surfaced in unrelated replies.
+const MAX_TURNS = 12;
+const WINDOW_MINUTES = 60;
 
 export interface Turn {
   role: "user" | "assistant";
