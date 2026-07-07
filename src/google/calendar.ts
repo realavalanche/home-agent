@@ -89,6 +89,31 @@ export interface FoundEvent {
   htmlLink?: string;
 }
 
+/** List events in a time window (for "what's on my calendar tomorrow?"). */
+export async function listEvents(
+  authorKey: AuthorKey,
+  timeMinISO: string,
+  timeMaxISO: string,
+  max = 15
+): Promise<FoundEvent[]> {
+  const cal = await calendarFor(authorKey);
+  if (!cal) return [];
+  const res = await cal.events.list({
+    calendarId: "primary",
+    timeMin: timeMinISO,
+    timeMax: timeMaxISO,
+    maxResults: max,
+    singleEvents: true,
+    orderBy: "startTime",
+  });
+  return (res.data.items ?? []).map((e) => ({
+    id: e.id ?? "",
+    summary: e.summary ?? "(no title)",
+    start: e.start?.dateTime ?? e.start?.date ?? undefined,
+    htmlLink: e.htmlLink ?? undefined,
+  }));
+}
+
 /** Search upcoming events by text — used to find the event to update/delete. */
 export async function findEvents(authorKey: AuthorKey, q: string, max = 5): Promise<FoundEvent[]> {
   const cal = await calendarFor(authorKey);

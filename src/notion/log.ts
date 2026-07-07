@@ -118,6 +118,33 @@ export async function findOpenTaskByText(
   return { id: page.id, title };
 }
 
+/** List a user's overdue tasks (Due before today, not Done). */
+export async function listOverdueTasks(
+  authorName: string,
+  todayISODate: string
+): Promise<{ title: string; due: string }[]> {
+  if (!config.NOTION_DS_TASKS) return [];
+  const res = await notion.dataSources.query({
+    data_source_id: config.NOTION_DS_TASKS,
+    filter: {
+      and: [
+        { property: "Author", select: { equals: authorName } },
+        { property: "Status", select: { does_not_equal: "Done" } },
+        { property: "Due", date: { before: todayISODate } },
+      ],
+    },
+    page_size: 25,
+  } as never);
+  return (res.results as { properties?: Record<string, unknown> }[]).map((page) => {
+    const titleProp = page.properties?.Title as { title?: { plain_text?: string }[] } | undefined;
+    const dueProp = page.properties?.Due as { date?: { start?: string } } | undefined;
+    return {
+      title: titleProp?.title?.map((t) => t.plain_text ?? "").join("") || "(untitled)",
+      due: dueProp?.date?.start ?? "",
+    };
+  });
+}
+
 export interface WeeklyReviewInput {
   title: string;
   authorName: string;

@@ -6,6 +6,7 @@ import { query } from "../db/pool.js";
 import { processIngest } from "../ingest.js";
 import { sendText } from "../whatsapp/client.js";
 import { runWeeklyReview } from "./weekly-review.js";
+import { runMorningBriefing } from "./morning-briefing.js";
 import { allUsers } from "../users.js";
 
 /**
@@ -30,6 +31,11 @@ export async function startScheduler(): Promise<void> {
     for (const job of jobs) await runWeeklyReview(job.data.authorKey);
   });
 
+  // 4) Morning briefing (one per user).
+  await boss.work<WeeklyJob>(QUEUES.MORNING, async (jobs: Job<WeeklyJob>[]) => {
+    for (const job of jobs) await runMorningBriefing(job.data.authorKey);
+  });
+
   // Cron: Sunday 21:00 IST → one weekly-review job per user (keyed schedules).
   // pg-boss cron is UTC unless tz is given; we pin it to the app timezone.
   for (const user of allUsers()) {
@@ -38,6 +44,13 @@ export async function startScheduler(): Promise<void> {
       "0 21 * * 0",
       { authorKey: user.key } satisfies WeeklyJob,
       { tz: config.TIMEZONE, key: `weekly-${user.key}` }
+    );
+    // Daily good-morning briefing at 06:30 IST.
+    await boss.schedule(
+      QUEUES.MORNING,
+      "30 6 * * *",
+      { authorKey: user.key } satisfies WeeklyJob,
+      { tz: config.TIMEZONE, key: `morning-${user.key}` }
     );
   }
 

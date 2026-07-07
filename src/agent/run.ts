@@ -8,7 +8,9 @@ import { loadRecentTurns, saveTurns } from "../memory.js";
 
 const anthropic = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
 
-const MAX_TURNS = 6;
+// Enough steps for a message that packs several actions (e.g. multiple reminders
+// or a recall→schedule chain) without leaving any dropped.
+const MAX_TURNS = 12;
 
 /**
  * Run the agent over one inbound message. Returns the final reply text (already

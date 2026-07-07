@@ -27,6 +27,19 @@ CREATE INDEX IF NOT EXISTS captures_embedding_idx
 CREATE INDEX IF NOT EXISTS captures_author_created_idx
   ON captures (author_key, created_at DESC);
 
+-- Durable long-term facts the assistant should remember indefinitely: contact
+-- numbers, birthdays, addresses, preferences, important dates. Household-shared
+-- (both users). Embedded for semantic recall months later.
+CREATE TABLE IF NOT EXISTS facts (
+  id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  content     TEXT NOT NULL,               -- e.g. "Arpita's phone is 9973499229"
+  embedding   vector(1024),
+  added_by    TEXT,                         -- 'A' | 'B'
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS facts_embedding_idx
+  ON facts USING hnsw (embedding vector_cosine_ops);
+
 -- Short-term conversation memory so the agent can follow a multi-message thread
 -- (e.g. "message Arpita" → later a number → later the text). One row per turn.
 CREATE TABLE IF NOT EXISTS conversation_turns (

@@ -25,10 +25,12 @@ import {
   completeReminderRow,
   completeReminderByTaskId,
 } from "../scheduler/schedule.js";
-import { createEvent, updateEvent, deleteEvent, findEvents } from "../google/calendar.js";
+import { createEvent, updateEvent, deleteEvent, findEvents, listEvents } from "../google/calendar.js";
 import { searchEmail, createDraft } from "../google/gmail.js";
 import { isConnected } from "../google/auth.js";
 import { normalizePhone } from "../config.js";
+import { rememberFact, recallFacts } from "../facts.js";
+import { DateTime } from "luxon";
 
 export interface AgentContext {
   user: User;
@@ -66,6 +68,43 @@ export const TOOLS: Anthropic.Tool[] = [
       type: "object",
       properties: { query: { type: "string" }, limit: { type: "number" } },
       required: ["query"],
+    },
+  },
+  {
+    name: "remember",
+    description:
+      "Permanently store a durable fact for later recall (a contact's phone number, a birthday, an address, an anniversary, a preference). Write it as a clear self-contained sentence.",
+    input_schema: {
+      type: "object",
+      properties: {
+        fact: {
+          type: "string",
+          description: "e.g. \"Arpita's phone number is 9973499229\" or \"Daughter Kuhu's birthday is 3 June 2024\"",
+        },
+      },
+      required: ["fact"],
+    },
+  },
+  {
+    name: "recall",
+    description:
+      "Look up durable facts stored earlier (phone numbers, birthdays, addresses, preferences). Use this BEFORE saying you don't know something, and to resolve a contact's number before messaging them.",
+    input_schema: {
+      type: "object",
+      properties: { query: { type: "string" } },
+      required: ["query"],
+    },
+  },
+  {
+    name: "list_calendar_events",
+    description:
+      "Read THIS user's upcoming Google Calendar events in a time window (e.g. 'what's on my calendar tomorrow?', 'am I free Friday?').",
+    input_schema: {
+      type: "object",
+      properties: {
+        start_iso: { type: "string", description: "Window start, ISO 8601 +05:30 (default: now)" },
+        end_iso: { type: "string", description: "Window end, ISO 8601 +05:30 (default: +24h)" },
+      },
     },
   },
   {
@@ -250,6 +289,12 @@ export async function runTool(name: string, input: Json, ctx: AgentContext): Pro
         return await handleLogCapture(input, ctx);
       case "semantic_search":
         return await handleSearch(input);
+      case "remember":
+        return await handleRemember(input, ctx);
+      case "recall":
+        return await handleRecall(input);
+      case "list_calendar_events":
+        return await handleListEvents(input, ctx);
       case "schedule_reminder":
         return await handleReminder(input, ctx);
       case "schedule_recurring_reminder":
@@ -352,6 +397,32 @@ async function handleSearch(input: Json): Promise<string> {
       (r, i) =>
         `${i + 1}. [${r.category}, ${r.authorName}, ${r.createdAt.slice(0, 10)}] ${r.transcript.slice(0, 160)}`
     )
+    .join("\n");
+}
+
+async function handleRemember(input: Json, ctx: AgentContext): Promise<string> {
+  const fact = str(input, "fact") ?? "";
+  if (!fact.trim()) return "Nothing to remember.";
+  await rememberFact(fact, ctx.user.key);
+  return `Got it — I'll remember: ${fact}`;
+}
+
+async function handleRecall(input: Json): Promise<string> {
+  const q = str(input, "query") ?? "";
+  const facts = await recallFacts(q, 5);
+  if (!facts.length) return "I don't have anything stored about that.";
+  return facts.map((f) => `- ${f.content}`).join("\n");
+}
+
+async function handleListEvents(input: Json, ctx: AgentContext): Promise<string> {
+  if (!(await isConnected(ctx.user.key))) return connectHint(ctx.user);
+  const now = DateTime.now().setZone(config.TIMEZONE);
+  const start = str(input, "start_iso") ?? now.toISO()!;
+  const end = str(input, "end_iso") ?? now.plus({ hours: 24 }).toISO()!;
+  const events = await listEvents(ctx.user.key, start, end);
+  if (!events.length) return "No events in that window.";
+  return events
+    .map((e) => `• ${e.summary}${e.start ? ` — ${e.start}` : ""}`)
     .join("\n");
 }
 

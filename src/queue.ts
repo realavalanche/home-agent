@@ -11,6 +11,7 @@ export const QUEUES = {
   INGEST: "ingest", // process one inbound WhatsApp message end-to-end
   SEND: "send-message", // fire a scheduled outbound/reminder WhatsApp message
   WEEKLY: "weekly-review", // Sunday 9pm IST per-user AI review
+  MORNING: "morning-briefing", // 6:30am IST per-user good-morning + overdue
 } as const;
 
 /** Payload for an inbound message to process. Raw audio is never queued — only
