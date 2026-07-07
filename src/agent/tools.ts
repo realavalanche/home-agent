@@ -47,7 +47,7 @@ export interface AgentContext {
   waMessageId: string;
   transcript: string;
   language: string;
-  source: "voice" | "text";
+  source: "voice" | "text" | "image";
 }
 
 /** Tool schemas advertised to Claude. */

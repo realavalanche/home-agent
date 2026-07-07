@@ -3,6 +3,7 @@ import type { IngestJob } from "./queue.js";
 import { identifyUser } from "./users.js";
 import { downloadMedia } from "./whatsapp/media.js";
 import { transcribe } from "./transcribe/sarvam.js";
+import { describeMedia } from "./vision.js";
 import { sendText, markRead } from "./whatsapp/client.js";
 import { runAgent } from "./agent/run.js";
 import type { AgentContext } from "./agent/tools.js";
@@ -28,10 +29,11 @@ export async function processIngest(job: IngestJob): Promise<void> {
 
   await markRead(job.waMessageId).catch(() => {});
 
-  // Resolve the message to text (transcribe voice notes; never persist audio).
+  // Resolve the message to text (transcribe voice; describe images/PDFs; never
+  // persist the raw media).
   let transcript: string;
   let language = "en-IN";
-  let source: "voice" | "text";
+  let source: "voice" | "text" | "image";
   if (job.type === "audio" && job.mediaId) {
     source = "voice";
     const media = await downloadMedia(job.mediaId);
@@ -42,6 +44,17 @@ export async function processIngest(job: IngestJob): Promise<void> {
       await sendText(user.whatsapp, "Sorry, I couldn't make out that voice note — could you resend it?");
       return;
     }
+  } else if ((job.type === "image" || job.type === "document") && job.mediaId) {
+    source = "image";
+    const media = await downloadMedia(job.mediaId);
+    const described = await describeMedia(media, job.caption);
+    if (!described) {
+      await sendText(user.whatsapp, "I can read images and PDFs, but not that file type yet.");
+      return;
+    }
+    // Include the caption so the agent has the user's intent alongside the extraction.
+    transcript = job.caption ? `${job.caption}\n\n[Attachment] ${described}` : `[Attachment] ${described}`;
+    language = looksHindi(job.caption ?? "") ? "hi-IN" : "en-IN";
   } else {
     source = "text";
     transcript = job.text ?? "";

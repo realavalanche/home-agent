@@ -20,6 +20,8 @@ interface WebhookBody {
           type: string;
           text?: { body: string };
           audio?: { id: string };
+          image?: { id: string; caption?: string };
+          document?: { id: string; caption?: string; filename?: string };
         }>;
       };
     }>;
@@ -83,6 +85,10 @@ export async function registerWebhookRoutes(app: FastifyInstance) {
             job = { ...base, type: "text", text: msg.text.body };
           } else if (msg.type === "audio" && msg.audio) {
             job = { ...base, type: "audio", mediaId: msg.audio.id };
+          } else if (msg.type === "image" && msg.image) {
+            job = { ...base, type: "image", mediaId: msg.image.id, caption: msg.image.caption };
+          } else if (msg.type === "document" && msg.document) {
+            job = { ...base, type: "document", mediaId: msg.document.id, caption: msg.document.caption };
           } else {
             // Unsupported type (image/sticker/etc.) — enqueue as a text note so
             // the agent can reply politely; keeps the pipeline uniform.

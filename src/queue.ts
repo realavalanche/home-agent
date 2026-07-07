@@ -19,9 +19,10 @@ export const QUEUES = {
 export interface IngestJob {
   waMessageId: string;
   fromPhone: string;
-  type: "text" | "audio";
+  type: "text" | "audio" | "image" | "document";
   text?: string; // for text messages
-  mediaId?: string; // for voice notes
+  mediaId?: string; // for voice notes, images, documents
+  caption?: string; // optional caption on an image/document
   timestamp: number;
 }
 

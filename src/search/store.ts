@@ -13,7 +13,7 @@ export interface StoreCaptureInput {
   waMessageId: string;
   authorKey: AuthorKey;
   authorName: string;
-  source: "voice" | "text";
+  source: "voice" | "text" | "image";
   languageCode: string;
   transcript: string;
   category: Category;

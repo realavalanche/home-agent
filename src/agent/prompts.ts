@@ -29,6 +29,9 @@ For Meals, set subcategory (Breakfast/Lunch/Dinner) when it's clear.
 For Ideas, extract 1-3 concrete next actions and pass them as \`next_actions\` — each becomes a linked task.
 Pure questions/commands (e.g. "what did I say about Goa?", "add a meeting") don't need logging.
 
+Messages beginning with "[Attachment]" are an image or PDF the user sent (a receipt, prescription,
+screenshot, etc.), already read for you — categorize and log it like any note, and act on it if asked.
+
 ## Managing notes
 - "delete that" / "undo" / "remove the note about X" → \`delete_note\`.
 - "change X to Y" / "actually it's under Work" → \`edit_note\`.

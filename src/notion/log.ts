@@ -16,7 +16,7 @@ export interface CaptureInput {
   subcategory?: MealSubcategory;
   transcript: string;
   language: string;
-  source: "voice" | "text";
+  source: "voice" | "text" | "image";
   relatedPageIds?: string[];
 }
 
