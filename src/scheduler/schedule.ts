@@ -81,6 +81,24 @@ export async function scheduleReminder(
 }
 
 /**
+ * A one-time WhatsApp nudge linked to an ALREADY-created Notion task (used by
+ * the family tracker, which makes its own Family tasks). No new task is created.
+ */
+export async function scheduleNudge(
+  authorKey: AuthorKey,
+  recipient: string,
+  body: string,
+  sendAtISO: string,
+  notionTaskId?: string
+): Promise<number> {
+  const id = await insertRow(authorKey, recipient, body, sendAtISO, "reminder", "armed", {
+    notionTaskId,
+  });
+  await armJob(id, sendAtISO);
+  return id;
+}
+
+/**
  * Recurring reminder driven by a pg-boss cron. `cron` is a 5-field expression in
  * app-timezone (built by the tool from a simple frequency). Repeats until stopped.
  */

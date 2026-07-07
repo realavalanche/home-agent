@@ -40,6 +40,8 @@ import { searchEmail, createDraft } from "../google/gmail.js";
 import { isConnected } from "../google/auth.js";
 import { normalizePhone } from "../config.js";
 import { rememberFact, recallFacts } from "../facts.js";
+import { scheduleNudge } from "../scheduler/schedule.js";
+import { buildImmunizationSchedule } from "../family.js";
 import { DateTime } from "luxon";
 
 export interface AgentContext {
@@ -132,6 +134,33 @@ export const TOOLS: Anthropic.Tool[] = [
     name: "show_shopping_list",
     description: "Show the household's running shopping list (recent Shopping items).",
     input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "add_family_event",
+    description:
+      "Log a dated family/baby/health item (doctor visit, school event, vaccination, milestone) as a tracked task with a reminder. Use for one-off family things with a date.",
+    input_schema: {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        date_iso: { type: "string", description: "When it's due/happening, ISO 8601 +05:30" },
+        remind: { type: "boolean", description: "Also send a WhatsApp reminder (default true)" },
+      },
+      required: ["title", "date_iso"],
+    },
+  },
+  {
+    name: "setup_vaccination_schedule",
+    description:
+      "Set up a child's full India immunization schedule from their date of birth: creates tracked Family tasks + reminders for each upcoming vaccine. Use when a parent asks to set up vaccinations.",
+    input_schema: {
+      type: "object",
+      properties: {
+        child_name: { type: "string" },
+        dob_iso: { type: "string", description: "Child's date of birth, yyyy-mm-dd" },
+      },
+      required: ["child_name", "dob_iso"],
+    },
   },
   {
     name: "list_calendar_events",
@@ -337,6 +366,10 @@ export async function runTool(name: string, input: Json, ctx: AgentContext): Pro
         return await handleEditNote(input, ctx);
       case "show_shopping_list":
         return await handleShoppingList();
+      case "add_family_event":
+        return await handleFamilyEvent(input, ctx);
+      case "setup_vaccination_schedule":
+        return await handleVaccinationSchedule(input, ctx);
       case "list_calendar_events":
         return await handleListEvents(input, ctx);
       case "schedule_reminder":
@@ -463,6 +496,57 @@ async function handleEditNote(input: Json, ctx: AgentContext): Promise<string> {
   });
   if (newText) await updateCaptureText(target.id, newText);
   return `Updated the note${newCategory ? ` (now ${newCategory})` : ""}.`;
+}
+
+async function handleFamilyEvent(input: Json, ctx: AgentContext): Promise<string> {
+  const title = str(input, "title") ?? "";
+  const dateISO = str(input, "date_iso");
+  if (!title || !dateISO) return "Need a title and a date.";
+  const taskId = await createTaskPage({ title: `👶 ${title}`, authorName: ctx.user.name, due: dateISO });
+  const remind = input.remind !== false;
+  if (remind) {
+    // Nudge the morning of, at 9am (or the given time if earlier in the day).
+    const due = DateTime.fromISO(dateISO, { zone: config.TIMEZONE });
+    const when = due < DateTime.now().setZone(config.TIMEZONE) ? due : due.set({ hour: 9, minute: 0 });
+    await scheduleNudge(ctx.user.key, ctx.user.whatsapp, `Reminder: ${title}`, when.toISO()!, taskId);
+  }
+  return `Added to Family tracker: "${title}" on ${dateISO.slice(0, 10)}${remind ? " with a reminder" : ""}.`;
+}
+
+async function handleVaccinationSchedule(input: Json, ctx: AgentContext): Promise<string> {
+  const child = str(input, "child_name") ?? "your child";
+  const dob = str(input, "dob_iso");
+  if (!dob) return "I need the child's date of birth (yyyy-mm-dd).";
+  const schedule = buildImmunizationSchedule(dob, config.TIMEZONE);
+  const now = DateTime.now().setZone(config.TIMEZONE);
+  const capNudge = now.plus({ months: 24 });
+
+  let created = 0;
+  const upcoming: string[] = [];
+  for (const v of schedule) {
+    const due = DateTime.fromISO(v.dueDateTimeISO, { zone: config.TIMEZONE });
+    if (due < now.startOf("day")) continue; // skip past vaccines (assumed done)
+    const taskId = await createTaskPage({
+      title: `💉 ${child} — ${v.label}`,
+      authorName: ctx.user.name,
+      due: v.dueISODate,
+    });
+    created++;
+    if (due <= capNudge) {
+      const remindAt = due.minus({ days: 3 });
+      const when = remindAt < now ? due : remindAt;
+      await scheduleNudge(
+        ctx.user.key,
+        ctx.user.whatsapp,
+        `💉 ${child}'s vaccination due soon: ${v.label}`,
+        when.toISO()!,
+        taskId
+      );
+    }
+    if (upcoming.length < 3) upcoming.push(`• ${v.label} — ${v.dueISODate}`);
+  }
+  if (!created) return `Looks like ${child}'s scheduled vaccines are all in the past — nothing upcoming to add.`;
+  return `Set up ${created} upcoming vaccination(s) for ${child} as tracked tasks with reminders. Next up:\n${upcoming.join("\n")}\n\n(General India schedule — please confirm exact dates with your pediatrician.)`;
 }
 
 async function handleShoppingList(): Promise<string> {
