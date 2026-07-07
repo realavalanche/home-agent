@@ -176,6 +176,43 @@ export async function stopReminder(
   return { ok: true, body: row.body };
 }
 
+/** The user's most recent reminder that has a linked Notion task. */
+export async function latestReminderWithTask(
+  authorKey: AuthorKey
+): Promise<ReminderRow | undefined> {
+  const res = await query<ReminderRow>(
+    `SELECT id, recipient, body, send_at, job_id, notion_task_id, schedule_key, status
+     FROM scheduled_messages
+     WHERE author_key = $1 AND kind = 'reminder' AND notion_task_id IS NOT NULL
+       AND status IN ('armed','sent','recurring')
+     ORDER BY COALESCE(last_fired_at, created_at) DESC LIMIT 1`,
+    [authorKey]
+  );
+  return res.rows[0];
+}
+
+/** Finalize a reminder row as done: cancel any pending/recurring jobs, set status. */
+export async function completeReminderRow(row: ReminderRow): Promise<void> {
+  const boss = await getBoss();
+  if (row.schedule_key) await boss.unschedule(QUEUES.SEND, row.schedule_key).catch(() => {});
+  if (row.job_id) await boss.cancel(QUEUES.SEND, row.job_id).catch(() => {});
+  await query(`UPDATE scheduled_messages SET status = 'done' WHERE id = $1`, [row.id]);
+}
+
+/** Complete the reminder row (if any) linked to a given Notion task id. */
+export async function completeReminderByTaskId(
+  authorKey: AuthorKey,
+  taskId: string
+): Promise<void> {
+  const res = await query<ReminderRow>(
+    `SELECT id, recipient, body, send_at, job_id, notion_task_id, schedule_key, status
+     FROM scheduled_messages WHERE author_key = $1 AND notion_task_id = $2`,
+    [authorKey, taskId]
+  );
+  const row = res.rows[0];
+  if (row) await completeReminderRow(row);
+}
+
 /** List the user's active reminders (armed one-time + recurring). */
 export async function listReminders(
   authorKey: AuthorKey

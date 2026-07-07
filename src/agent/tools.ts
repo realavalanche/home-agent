@@ -3,7 +3,13 @@ import { config } from "../config.js";
 import { logger } from "../logger.js";
 import type { User } from "../users.js";
 import { CATEGORIES, MEAL_SUBCATEGORIES, type Category } from "../categorize.js";
-import { createCapturePage, createTaskPage, linkRelated } from "../notion/log.js";
+import {
+  createCapturePage,
+  createTaskPage,
+  linkRelated,
+  findOpenTaskByText,
+  markTaskDone,
+} from "../notion/log.js";
 import { storeCapture, semanticSearch, findRelated } from "../search/store.js";
 import {
   scheduleReminder,
@@ -15,6 +21,9 @@ import {
   confirmScheduled,
   cancelScheduled,
   latestPendingConfirmation,
+  latestReminderWithTask,
+  completeReminderRow,
+  completeReminderByTaskId,
 } from "../scheduler/schedule.js";
 import { createEvent, updateEvent, deleteEvent, findEvents } from "../google/calendar.js";
 import { searchEmail, createDraft } from "../google/gmail.js";
@@ -121,6 +130,20 @@ export const TOOLS: Anthropic.Tool[] = [
     name: "list_reminders",
     description: "List this user's active reminders (one-time and recurring).",
     input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "mark_done",
+    description:
+      "Mark a task/reminder as Done in Notion. Use when the user says 'done', 'finished', 'completed X'. With no match_text, completes the most recent reminder.",
+    input_schema: {
+      type: "object",
+      properties: {
+        match_text: {
+          type: "string",
+          description: "Words from the task to complete (optional; omit for the latest reminder)",
+        },
+      },
+    },
   },
   {
     name: "schedule_outbound",
@@ -237,6 +260,8 @@ export async function runTool(name: string, input: Json, ctx: AgentContext): Pro
         return await handleStop(input, ctx);
       case "list_reminders":
         return await handleListReminders(ctx);
+      case "mark_done":
+        return await handleMarkDone(input, ctx);
       case "schedule_outbound":
         return await handleOutbound(input, ctx);
       case "confirm_pending_send":
@@ -383,6 +408,24 @@ async function handleSnooze(input: Json, ctx: AgentContext): Promise<string> {
 async function handleStop(input: Json, ctx: AgentContext): Promise<string> {
   const res = await stopReminder(ctx.user.key, str(input, "match_text"));
   return res.ok ? `Stopped the reminder "${res.body}".` : "I couldn't find a reminder to stop.";
+}
+
+async function handleMarkDone(input: Json, ctx: AgentContext): Promise<string> {
+  const matchText = str(input, "match_text");
+  if (matchText) {
+    // Match any open task by title (covers reminders AND Idea-derived tasks).
+    const task = await findOpenTaskByText(matchText);
+    if (!task) return `I couldn't find an open task matching "${matchText}".`;
+    await markTaskDone(task.id);
+    await completeReminderByTaskId(ctx.user.key, task.id);
+    return `Marked "${task.title}" as done. ✅`;
+  }
+  // No text: complete the user's most recent reminder.
+  const row = await latestReminderWithTask(ctx.user.key);
+  if (!row?.notion_task_id) return "Which task should I mark done? Tell me a word or two from it.";
+  await markTaskDone(row.notion_task_id);
+  await completeReminderRow(row);
+  return `Marked "${row.body}" as done. ✅`;
 }
 
 async function handleListReminders(ctx: AgentContext): Promise<string> {

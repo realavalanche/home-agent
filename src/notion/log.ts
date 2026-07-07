@@ -96,6 +96,28 @@ export async function markTaskDone(pageId: string): Promise<void> {
   });
 }
 
+/** Find the best-matching open (not Done) Task by title text. */
+export async function findOpenTaskByText(
+  text: string
+): Promise<{ id: string; title: string } | undefined> {
+  const dsId = requireDs(config.NOTION_DS_TASKS, "NOTION_DS_TASKS");
+  const res = await notion.dataSources.query({
+    data_source_id: dsId,
+    filter: {
+      and: [
+        { property: "Title", title: { contains: text } },
+        { property: "Status", select: { does_not_equal: "Done" } },
+      ],
+    },
+    page_size: 5,
+  } as never);
+  const page = res.results[0] as { id: string; properties?: Record<string, unknown> } | undefined;
+  if (!page) return undefined;
+  const titleProp = page.properties?.Title as { title?: { plain_text?: string }[] } | undefined;
+  const title = titleProp?.title?.map((t) => t.plain_text ?? "").join("") || text;
+  return { id: page.id, title };
+}
+
 export interface WeeklyReviewInput {
   title: string;
   authorName: string;
