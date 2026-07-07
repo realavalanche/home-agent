@@ -7,6 +7,7 @@ import { processIngest } from "../ingest.js";
 import { sendText } from "../whatsapp/client.js";
 import { runWeeklyReview } from "./weekly-review.js";
 import { runMorningBriefing } from "./morning-briefing.js";
+import { runNotionSync } from "./notion-sync.js";
 import { allUsers } from "../users.js";
 
 /**
@@ -35,6 +36,12 @@ export async function startScheduler(): Promise<void> {
   await boss.work<WeeklyJob>(QUEUES.MORNING, async (jobs: Job<WeeklyJob>[]) => {
     for (const job of jobs) await runMorningBriefing(job.data.authorKey);
   });
+
+  // 5) Notion → Postgres reconcile.
+  await boss.work(QUEUES.NOTION_SYNC, async () => {
+    await runNotionSync();
+  });
+  await boss.schedule(QUEUES.NOTION_SYNC, "*/20 * * * *", {}, { tz: config.TIMEZONE, key: "notion-sync" });
 
   // Cron: Sunday 21:00 IST → one weekly-review job per user (keyed schedules).
   // pg-boss cron is UTC unless tz is given; we pin it to the app timezone.

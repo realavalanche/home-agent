@@ -12,6 +12,7 @@ export const QUEUES = {
   SEND: "send-message", // fire a scheduled outbound/reminder WhatsApp message
   WEEKLY: "weekly-review", // Sunday 9pm IST per-user AI review
   MORNING: "morning-briefing", // 6:30am IST per-user good-morning + overdue
+  NOTION_SYNC: "notion-sync", // reconcile the Postgres index with Notion edits/deletes
 } as const;
 
 /** Payload for an inbound message to process. Raw audio is never queued — only
