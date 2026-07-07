@@ -44,7 +44,11 @@ export async function startScheduler(): Promise<void> {
   logger.info("scheduler + workers started", { tz: config.TIMEZONE });
 }
 
-/** Send a scheduled message if it is still armed, then mark it sent. */
+/**
+ * Send a scheduled message. One-time messages (status 'armed') are marked 'sent'
+ * afterward; recurring reminders (status 'recurring') keep firing on their cron
+ * and just record last_fired_at. Anything else (cancelled/sent) is skipped.
+ */
 async function dispatchScheduled(scheduledId: number): Promise<void> {
   const res = await query<{ recipient: string; body: string; status: string }>(
     `SELECT recipient, body, status FROM scheduled_messages WHERE id = $1`,
@@ -52,11 +56,17 @@ async function dispatchScheduled(scheduledId: number): Promise<void> {
   );
   const row = res.rows[0];
   if (!row) return;
-  if (row.status !== "armed") {
-    logger.info("skip scheduled (not armed)", { scheduledId, status: row.status });
+  if (row.status !== "armed" && row.status !== "recurring") {
+    logger.info("skip scheduled", { scheduledId, status: row.status });
     return;
   }
   await sendText(row.recipient, row.body);
-  await query(`UPDATE scheduled_messages SET status = 'sent' WHERE id = $1`, [scheduledId]);
-  logger.info("scheduled message sent", { scheduledId, to: row.recipient });
+  if (row.status === "recurring") {
+    await query(`UPDATE scheduled_messages SET last_fired_at = now() WHERE id = $1`, [scheduledId]);
+  } else {
+    await query(`UPDATE scheduled_messages SET status = 'sent', last_fired_at = now() WHERE id = $1`, [
+      scheduledId,
+    ]);
+  }
+  logger.info("scheduled message sent", { scheduledId, to: row.recipient, recurring: row.status === "recurring" });
 }

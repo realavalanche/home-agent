@@ -80,6 +80,22 @@ export async function createTaskPage(input: TaskInput): Promise<string> {
   return page.id;
 }
 
+/** Move a task's Due date (used when a reminder is snoozed/postponed). */
+export async function updateTaskDue(pageId: string, dueISO: string): Promise<void> {
+  await notion.pages.update({
+    page_id: pageId,
+    properties: { Due: { date: { start: dueISO } } } as never,
+  });
+}
+
+/** Mark a task done (used when a recurring reminder is stopped). */
+export async function markTaskDone(pageId: string): Promise<void> {
+  await notion.pages.update({
+    page_id: pageId,
+    properties: { Status: { select: { name: "Done" } } } as never,
+  });
+}
+
 export interface WeeklyReviewInput {
   title: string;
   authorName: string;

@@ -50,7 +50,17 @@ CREATE TABLE IF NOT EXISTS scheduled_messages (
   body          TEXT NOT NULL,
   send_at       TIMESTAMPTZ NOT NULL,
   kind          TEXT NOT NULL,               -- 'reminder' | 'outbound'
-  status        TEXT NOT NULL DEFAULT 'pending', -- pending|awaiting_confirm|armed|sent|cancelled
+  status        TEXT NOT NULL DEFAULT 'pending', -- pending|awaiting_confirm|armed|sent|cancelled|recurring
   job_id        TEXT,                        -- pg-boss job id once armed
+  notion_task_id TEXT,                       -- linked Notion Task page (reminders)
+  recurrence    TEXT,                        -- pg-boss cron for recurring reminders; null = one-time
+  schedule_key  TEXT,                        -- pg-boss schedule key for recurring reminders
+  last_fired_at TIMESTAMPTZ,                 -- last time a (recurring) reminder fired
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Idempotent column adds so this applies to an already-created table.
+ALTER TABLE scheduled_messages ADD COLUMN IF NOT EXISTS notion_task_id TEXT;
+ALTER TABLE scheduled_messages ADD COLUMN IF NOT EXISTS recurrence    TEXT;
+ALTER TABLE scheduled_messages ADD COLUMN IF NOT EXISTS schedule_key  TEXT;
+ALTER TABLE scheduled_messages ADD COLUMN IF NOT EXISTS last_fired_at TIMESTAMPTZ;

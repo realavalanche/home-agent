@@ -7,6 +7,10 @@ import { createCapturePage, createTaskPage, linkRelated } from "../notion/log.js
 import { storeCapture, semanticSearch, findRelated } from "../search/store.js";
 import {
   scheduleReminder,
+  scheduleRecurringReminder,
+  snoozeReminder,
+  stopReminder,
+  listReminders,
   scheduleOutboundPending,
   confirmScheduled,
   cancelScheduled,
@@ -66,6 +70,57 @@ export const TOOLS: Anthropic.Tool[] = [
       },
       required: ["message", "when_iso"],
     },
+  },
+  {
+    name: "schedule_recurring_reminder",
+    description:
+      "Set a REPEATING WhatsApp reminder to THIS user (e.g. every day at 9am, every weekday, every Monday). Repeats until the user says stop.",
+    input_schema: {
+      type: "object",
+      properties: {
+        message: { type: "string", description: "What to remind them" },
+        frequency: { type: "string", enum: ["daily", "weekdays", "weekly"] },
+        time_hhmm: { type: "string", description: "24h time in IST, e.g. 09:00 or 21:30" },
+        day_of_week: {
+          type: "number",
+          description: "For weekly only: 0=Sunday … 6=Saturday",
+        },
+        next_when_iso: {
+          type: "string",
+          description: "ISO 8601 (+05:30) of the NEXT time it should fire, for display/tracking",
+        },
+      },
+      required: ["message", "frequency", "time_hhmm", "next_when_iso"],
+    },
+  },
+  {
+    name: "snooze_reminder",
+    description:
+      "Postpone/snooze the user's active reminder to a new time (e.g. 'remind me in 2 hours', 'push to tomorrow'). Optionally match which reminder by text.",
+    input_schema: {
+      type: "object",
+      properties: {
+        new_when_iso: { type: "string", description: "ISO 8601 with +05:30 offset" },
+        match_text: { type: "string", description: "Words from the reminder to disambiguate (optional)" },
+      },
+      required: ["new_when_iso"],
+    },
+  },
+  {
+    name: "stop_reminder",
+    description:
+      "Stop/cancel a recurring reminder (or a pending one-time reminder). Optionally match which one by text.",
+    input_schema: {
+      type: "object",
+      properties: {
+        match_text: { type: "string", description: "Words from the reminder to disambiguate (optional)" },
+      },
+    },
+  },
+  {
+    name: "list_reminders",
+    description: "List this user's active reminders (one-time and recurring).",
+    input_schema: { type: "object", properties: {} },
   },
   {
     name: "schedule_outbound",
@@ -174,6 +229,14 @@ export async function runTool(name: string, input: Json, ctx: AgentContext): Pro
         return await handleSearch(input);
       case "schedule_reminder":
         return await handleReminder(input, ctx);
+      case "schedule_recurring_reminder":
+        return await handleRecurringReminder(input, ctx);
+      case "snooze_reminder":
+        return await handleSnooze(input, ctx);
+      case "stop_reminder":
+        return await handleStop(input, ctx);
+      case "list_reminders":
+        return await handleListReminders(ctx);
       case "schedule_outbound":
         return await handleOutbound(input, ctx);
       case "confirm_pending_send":
@@ -271,8 +334,63 @@ async function handleReminder(input: Json, ctx: AgentContext): Promise<string> {
   const message = str(input, "message") ?? "";
   const when = str(input, "when_iso");
   if (!when) return "Missing when_iso.";
-  await scheduleReminder(ctx.user.key, ctx.user.whatsapp, message, when);
-  return `Reminder scheduled for ${when}.`;
+  await scheduleReminder(ctx.user.key, ctx.user.name, ctx.user.whatsapp, message, when);
+  return `Reminder set for ${when} and added to your Tasks in Notion. You can postpone it anytime by replying.`;
+}
+
+/** Build a 5-field cron (min hour * * dow) in app timezone from simple inputs. */
+function buildCron(frequency: string, timeHHMM: string, dayOfWeek?: number): string | undefined {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(timeHHMM.trim());
+  if (!m) return undefined;
+  const hour = Number(m[1]);
+  const minute = Number(m[2]);
+  if (hour > 23 || minute > 59) return undefined;
+  if (frequency === "daily") return `${minute} ${hour} * * *`;
+  if (frequency === "weekdays") return `${minute} ${hour} * * 1-5`;
+  if (frequency === "weekly") return `${minute} ${hour} * * ${dayOfWeek ?? 1}`;
+  return undefined;
+}
+
+async function handleRecurringReminder(input: Json, ctx: AgentContext): Promise<string> {
+  const message = str(input, "message") ?? "";
+  const frequency = str(input, "frequency") ?? "daily";
+  const time = str(input, "time_hhmm") ?? "";
+  const next = str(input, "next_when_iso") ?? new Date().toISOString();
+  const cron = buildCron(frequency, time, num(input, "day_of_week"));
+  if (!cron) return "Could not build a schedule — need a valid frequency and time like 09:00.";
+  await scheduleRecurringReminder(
+    ctx.user.key,
+    ctx.user.name,
+    ctx.user.whatsapp,
+    message,
+    cron,
+    config.TIMEZONE,
+    next
+  );
+  const label = frequency === "weekly" ? "every week" : frequency === "weekdays" ? "every weekday" : "every day";
+  return `Recurring reminder set: "${message}" ${label} at ${time} IST. Reply "stop" to end it.`;
+}
+
+async function handleSnooze(input: Json, ctx: AgentContext): Promise<string> {
+  const when = str(input, "new_when_iso");
+  if (!when) return "Missing new time.";
+  const res = await snoozeReminder(ctx.user.key, when, str(input, "match_text"));
+  return res.ok
+    ? `Postponed "${res.body}" to ${when}.`
+    : "I couldn't find an active reminder to postpone.";
+}
+
+async function handleStop(input: Json, ctx: AgentContext): Promise<string> {
+  const res = await stopReminder(ctx.user.key, str(input, "match_text"));
+  return res.ok ? `Stopped the reminder "${res.body}".` : "I couldn't find a reminder to stop.";
+}
+
+async function handleListReminders(ctx: AgentContext): Promise<string> {
+  const items = await listReminders(ctx.user.key);
+  if (!items.length) return "You have no active reminders.";
+  return items
+    .map((r) => `• ${r.body}${r.recurring ? " (recurring)" : ` — ${new Date(r.send_at).toISOString()}`}`)
+    .join("\n");
 }
 
 async function handleOutbound(input: Json, ctx: AgentContext): Promise<string> {
