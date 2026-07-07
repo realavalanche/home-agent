@@ -9,13 +9,14 @@ import type { AuthorKey } from "../users.js";
  * refresh token and mint access tokens on demand. Two fully separate token sets
  * means calendar/gmail actions always happen as the right person.
  *
- * Scopes: full calendar (CRUD) + gmail read + gmail compose (drafts). We never
- * call messages.send, so the agent can draft but not auto-send email.
+ * Scopes: Calendar only for now. Gmail's scopes are "restricted" and trigger a
+ * heavy Google verification, so they're left out until wanted — re-add the two
+ * gmail scopes here (and enable the Gmail API) to turn email back on.
  */
 export const GOOGLE_SCOPES = [
   "https://www.googleapis.com/auth/calendar",
-  "https://www.googleapis.com/auth/gmail.readonly",
-  "https://www.googleapis.com/auth/gmail.compose",
+  // "https://www.googleapis.com/auth/gmail.readonly",
+  // "https://www.googleapis.com/auth/gmail.compose",
 ];
 
 function requireGoogleConfig() {
