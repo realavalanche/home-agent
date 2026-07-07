@@ -9,8 +9,18 @@ import {
   linkRelated,
   findOpenTaskByText,
   markTaskDone,
+  archiveCapturePage,
+  updateCapturePage,
 } from "../notion/log.js";
-import { storeCapture, semanticSearch, findRelated } from "../search/store.js";
+import {
+  storeCapture,
+  semanticSearch,
+  findRelated,
+  findRecentCaptures,
+  listCategoryCaptures,
+  deleteCaptureRow,
+  updateCaptureText,
+} from "../search/store.js";
 import {
   scheduleReminder,
   scheduleRecurringReminder,
@@ -94,6 +104,34 @@ export const TOOLS: Anthropic.Tool[] = [
       properties: { query: { type: "string" } },
       required: ["query"],
     },
+  },
+  {
+    name: "delete_note",
+    description:
+      "Delete/undo a note you saved. With no match_text, removes the most recent note (an 'undo'). Trashes the Notion page and removes it from search.",
+    input_schema: {
+      type: "object",
+      properties: {
+        match_text: { type: "string", description: "Words from the note to delete (optional)" },
+      },
+    },
+  },
+  {
+    name: "edit_note",
+    description: "Edit a saved note's text and/or category. Finds it by text or takes the most recent.",
+    input_schema: {
+      type: "object",
+      properties: {
+        match_text: { type: "string" },
+        new_text: { type: "string" },
+        new_category: { type: "string", enum: CATEGORIES as unknown as string[] },
+      },
+    },
+  },
+  {
+    name: "show_shopping_list",
+    description: "Show the household's running shopping list (recent Shopping items).",
+    input_schema: { type: "object", properties: {} },
   },
   {
     name: "list_calendar_events",
@@ -293,6 +331,12 @@ export async function runTool(name: string, input: Json, ctx: AgentContext): Pro
         return await handleRemember(input, ctx);
       case "recall":
         return await handleRecall(input);
+      case "delete_note":
+        return await handleDeleteNote(input, ctx);
+      case "edit_note":
+        return await handleEditNote(input, ctx);
+      case "show_shopping_list":
+        return await handleShoppingList();
       case "list_calendar_events":
         return await handleListEvents(input, ctx);
       case "schedule_reminder":
@@ -398,6 +442,33 @@ async function handleSearch(input: Json): Promise<string> {
         `${i + 1}. [${r.category}, ${r.authorName}, ${r.createdAt.slice(0, 10)}] ${r.transcript.slice(0, 160)}`
     )
     .join("\n");
+}
+
+async function handleDeleteNote(input: Json, ctx: AgentContext): Promise<string> {
+  const [target] = await findRecentCaptures(ctx.user.key, str(input, "match_text") ?? "", 1);
+  if (!target) return "I couldn't find a note to delete.";
+  await archiveCapturePage(target.notionPageId).catch(() => {});
+  await deleteCaptureRow(target.id);
+  return `Deleted: "${target.transcript.slice(0, 60)}".`;
+}
+
+async function handleEditNote(input: Json, ctx: AgentContext): Promise<string> {
+  const [target] = await findRecentCaptures(ctx.user.key, str(input, "match_text") ?? "", 1);
+  if (!target) return "I couldn't find a note to edit.";
+  const newText = str(input, "new_text");
+  const newCategory = str(input, "new_category") as Category | undefined;
+  await updateCapturePage(target.notionPageId, {
+    transcript: newText,
+    category: newCategory,
+  });
+  if (newText) await updateCaptureText(target.id, newText);
+  return `Updated the note${newCategory ? ` (now ${newCategory})` : ""}.`;
+}
+
+async function handleShoppingList(): Promise<string> {
+  const items = await listCategoryCaptures("Shopping", 40);
+  if (!items.length) return "Your shopping list is empty.";
+  return "🛒 Shopping list:\n" + items.map((i) => `• ${i.transcript.slice(0, 80)}`).join("\n");
 }
 
 async function handleRemember(input: Json, ctx: AgentContext): Promise<string> {

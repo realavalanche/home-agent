@@ -98,6 +98,80 @@ export async function findRelated(
   return res.rows.map(mapRow).filter((r) => r.similarity >= minSimilarity);
 }
 
+export interface CaptureRef {
+  id: number;
+  transcript: string;
+  category: string;
+  notionPageId: string;
+  createdAt: string;
+}
+
+/** Find a user's captures by recency, optionally biased to a text match. */
+export async function findRecentCaptures(
+  authorKey: AuthorKey,
+  matchText = "",
+  limit = 5
+): Promise<CaptureRef[]> {
+  const res = await query<{
+    id: number;
+    transcript: string;
+    category: string;
+    notion_page_id: string;
+    created_at: string;
+  }>(
+    `SELECT id, transcript, category, notion_page_id, created_at
+     FROM captures
+     WHERE author_key = $1 AND ($2 = '' OR transcript ILIKE '%' || $2 || '%')
+     ORDER BY (($2 <> '') AND transcript ILIKE '%' || $2 || '%') DESC, created_at DESC
+     LIMIT $3`,
+    [authorKey, matchText, limit]
+  );
+  return res.rows.map((r) => ({
+    id: r.id,
+    transcript: r.transcript,
+    category: r.category,
+    notionPageId: r.notion_page_id,
+    createdAt: typeof r.created_at === "string" ? r.created_at : new Date(r.created_at).toISOString(),
+  }));
+}
+
+/** List the household's captures in a category (e.g. Shopping) — a running list. */
+export async function listCategoryCaptures(category: string, limit = 40): Promise<CaptureRef[]> {
+  const res = await query<{
+    id: number;
+    transcript: string;
+    category: string;
+    notion_page_id: string;
+    created_at: string;
+  }>(
+    `SELECT id, transcript, category, notion_page_id, created_at
+     FROM captures WHERE category = $1 ORDER BY created_at DESC LIMIT $2`,
+    [category, limit]
+  );
+  return res.rows.map((r) => ({
+    id: r.id,
+    transcript: r.transcript,
+    category: r.category,
+    notionPageId: r.notion_page_id,
+    createdAt: typeof r.created_at === "string" ? r.created_at : new Date(r.created_at).toISOString(),
+  }));
+}
+
+/** Delete a capture from the Postgres index (Notion page is archived separately). */
+export async function deleteCaptureRow(id: number): Promise<void> {
+  await query(`DELETE FROM captures WHERE id = $1`, [id]);
+}
+
+/** Update a capture's text + re-embed it so search stays accurate. */
+export async function updateCaptureText(id: number, newText: string): Promise<void> {
+  const vec = await embed(newText, "document");
+  await query(`UPDATE captures SET transcript = $2, embedding = $3 WHERE id = $1`, [
+    id,
+    newText,
+    toVector(vec),
+  ]);
+}
+
 interface RelatedNoteRow {
   id: number;
   transcript: string;

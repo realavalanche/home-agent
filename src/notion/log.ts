@@ -43,6 +43,24 @@ export async function createCapturePage(input: CaptureInput): Promise<string> {
   return page.id;
 }
 
+/** Send a capture page to Notion's trash (used for delete/undo). */
+export async function archiveCapturePage(pageId: string): Promise<void> {
+  await notion.pages.update({ page_id: pageId, in_trash: true } as never);
+}
+
+/** Update a capture page's transcript and/or category (used for edit). */
+export async function updateCapturePage(
+  pageId: string,
+  changes: { transcript?: string; category?: Category; title?: string }
+): Promise<void> {
+  const properties: Record<string, unknown> = {};
+  if (changes.transcript) properties.Transcript = { rich_text: text(changes.transcript) };
+  if (changes.category) properties.Category = { select: { name: changes.category } };
+  if (changes.title) properties.Title = { title: text(changes.title) };
+  if (Object.keys(properties).length === 0) return;
+  await notion.pages.update({ page_id: pageId, properties: properties as never });
+}
+
 /** Attach related-note relations to an existing capture (auto-link on ingest). */
 export async function linkRelated(pageId: string, relatedPageIds: string[]): Promise<void> {
   if (!relatedPageIds.length) return;
