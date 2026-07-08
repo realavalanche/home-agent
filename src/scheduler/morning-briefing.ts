@@ -5,6 +5,8 @@ import { logger } from "../logger.js";
 import { query } from "../db/pool.js";
 import { getUser, type AuthorKey } from "../users.js";
 import { listOverdueTasks } from "../notion/log.js";
+import { listEvents } from "../google/calendar.js";
+import { isConnected } from "../google/auth.js";
 import { sendText } from "../whatsapp/client.js";
 
 const anthropic = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
@@ -29,11 +31,25 @@ export async function runMorningBriefing(authorKey: AuthorKey): Promise<void> {
     [authorKey, startOfYesterday.toISO(), startOfToday.toISO()]
   ).catch(() => ({ rows: [] as { category: string; transcript: string; language_code: string }[] }));
 
-  const overdue = await listOverdueTasks(user.name, todayISODate).catch(() => []);
+  // Overdue tasks, but only those slipped in the last few days — old, un-cleared
+  // items shouldn't pile up in the daily nudge.
+  const overdueAll = await listOverdueTasks(user.name, todayISODate).catch(() => []);
+  const cutoff = startOfToday.minus({ days: 4 }).toISODate()!;
+  const overdue = overdueAll.filter((o) => o.due && o.due.slice(0, 10) >= cutoff).slice(0, 5);
 
-  // If there's nothing to say and nothing overdue, still send a short hello.
+  // Today's REAL calendar events (so "today" is grounded, never invented).
+  let todayEvents: { summary: string; start?: string }[] = [];
+  if (await isConnected(authorKey).catch(() => false)) {
+    todayEvents = await listEvents(
+      authorKey,
+      startOfToday.toISO()!,
+      startOfToday.endOf("day").toISO()!
+    ).catch(() => []);
+  }
+
   const yesterdayNotes = caps.rows.map((r) => `- [${r.category}] ${r.transcript.slice(0, 200)}`).join("\n");
   const overdueList = overdue.map((o) => `- ${o.title} (was due ${o.due.slice(0, 10)})`).join("\n");
+  const todayList = todayEvents.map((e) => `- ${e.summary}${e.start ? ` at ${e.start.slice(11, 16)}` : ""}`).join("\n");
   const hindiShare =
     caps.rows.length > 0
       ? caps.rows.filter((r) => (r.language_code ?? "").startsWith("hi")).length / caps.rows.length
@@ -45,19 +61,28 @@ export async function runMorningBriefing(authorKey: AuthorKey): Promise<void> {
     max_tokens: 500,
     system: `You are Home-Agent sending ${user.name} a short, warm good-morning briefing at 6:30am.
 ${lang} Be genuinely kind and human, not corporate. Under ~120 words.
-Structure lightly: a warm greeting, a one-line reflection on yesterday, then anything overdue to
-gently nudge (only if present), and a small encouraging line for today. If there's nothing from
-yesterday and nothing overdue, just send a brief cheerful good morning.`,
+
+CRITICAL: Use ONLY the facts provided below. Do NOT invent, infer, or add any events, meetings,
+tasks, or plans that aren't explicitly listed. Items under "Yesterday" are in the PAST — reflect on
+them warmly; NEVER present them as upcoming or as "today". Only the items under "Today's calendar"
+are today's actual events — if that list is empty, do not mention any plans for today.
+
+Structure: a warm greeting; a one-line reflection on yesterday (only if there's something); a gentle
+nudge on overdue items (only if present); today's real calendar events (only if listed); a short
+encouraging close. If everything is empty, just send a brief cheerful good morning.`,
     messages: [
       {
         role: "user",
         content: `Date: ${now.toFormat("cccc, dd LLL")}.
 
-Yesterday ${user.name} captured:
+Yesterday ${user.name} captured (PAST — for reflection only):
 ${yesterdayNotes || "(nothing)"}
 
-Overdue tasks:
-${overdueList || "(none)"}`,
+Overdue tasks (gentle nudge, only if listed):
+${overdueList || "(none)"}
+
+Today's calendar (the ONLY real events for today):
+${todayList || "(nothing scheduled)"}`,
       },
     ],
   });
