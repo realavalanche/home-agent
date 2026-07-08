@@ -5,6 +5,7 @@ import { getBoss, QUEUES, type IngestJob, type SendJob, type WeeklyJob } from ".
 import { query } from "../db/pool.js";
 import { processIngest } from "../ingest.js";
 import { sendText } from "../whatsapp/client.js";
+import { markTaskDone } from "../notion/log.js";
 import { runWeeklyReview } from "./weekly-review.js";
 import { runMorningBriefing } from "./morning-briefing.js";
 import { runNotionSync } from "./notion-sync.js";
@@ -70,8 +71,15 @@ export async function startScheduler(): Promise<void> {
  * and just record last_fired_at. Anything else (cancelled/sent) is skipped.
  */
 async function dispatchScheduled(scheduledId: number): Promise<void> {
-  const res = await query<{ recipient: string; body: string; status: string }>(
-    `SELECT recipient, body, status FROM scheduled_messages WHERE id = $1`,
+  const res = await query<{
+    recipient: string;
+    body: string;
+    status: string;
+    notion_task_id: string | null;
+    auto_complete: boolean;
+  }>(
+    `SELECT recipient, body, status, notion_task_id, auto_complete
+     FROM scheduled_messages WHERE id = $1`,
     [scheduledId]
   );
   const row = res.rows[0];
@@ -87,6 +95,11 @@ async function dispatchScheduled(scheduledId: number): Promise<void> {
     await query(`UPDATE scheduled_messages SET status = 'sent', last_fired_at = now() WHERE id = $1`, [
       scheduledId,
     ]);
+    // A pure reminder is complete once delivered — close its task so it doesn't
+    // linger as overdue. (Family/vaccination nudges have auto_complete = false.)
+    if (row.auto_complete && row.notion_task_id) {
+      await markTaskDone(row.notion_task_id).catch(() => {});
+    }
   }
   logger.info("scheduled message sent", { scheduledId, to: row.recipient, recurring: row.status === "recurring" });
 }

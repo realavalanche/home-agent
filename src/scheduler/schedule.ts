@@ -21,12 +21,17 @@ async function insertRow(
   sendAtISO: string,
   kind: "reminder" | "outbound",
   status: "armed" | "awaiting_confirm" | "recurring",
-  extra: { notionTaskId?: string; recurrence?: string; scheduleKey?: string } = {}
+  extra: {
+    notionTaskId?: string;
+    recurrence?: string;
+    scheduleKey?: string;
+    autoComplete?: boolean;
+  } = {}
 ): Promise<number> {
   const res = await query<{ id: number }>(
     `INSERT INTO scheduled_messages
-       (author_key, recipient, body, send_at, kind, status, notion_task_id, recurrence, schedule_key)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+       (author_key, recipient, body, send_at, kind, status, notion_task_id, recurrence, schedule_key, auto_complete)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
     [
       authorKey,
       recipient,
@@ -37,6 +42,7 @@ async function insertRow(
       extra.notionTaskId ?? null,
       extra.recurrence ?? null,
       extra.scheduleKey ?? null,
+      extra.autoComplete ?? false,
     ]
   );
   return res.rows[0]!.id;
@@ -93,6 +99,7 @@ export async function scheduleNudge(
 ): Promise<number> {
   const id = await insertRow(authorKey, recipient, body, sendAtISO, "reminder", "armed", {
     notionTaskId,
+    autoComplete: true, // a pure reminder is done once it fires
   });
   await armJob(id, sendAtISO);
   return id;

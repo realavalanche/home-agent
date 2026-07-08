@@ -89,3 +89,6 @@ ALTER TABLE scheduled_messages ADD COLUMN IF NOT EXISTS notion_task_id TEXT;
 ALTER TABLE scheduled_messages ADD COLUMN IF NOT EXISTS recurrence    TEXT;
 ALTER TABLE scheduled_messages ADD COLUMN IF NOT EXISTS schedule_key  TEXT;
 ALTER TABLE scheduled_messages ADD COLUMN IF NOT EXISTS last_fired_at TIMESTAMPTZ;
+-- Pure reminders auto-complete their linked task once fired (a nudge is done when
+-- delivered). Family/vaccination nudges keep their task open.
+ALTER TABLE scheduled_messages ADD COLUMN IF NOT EXISTS auto_complete BOOLEAN NOT NULL DEFAULT false;
