@@ -47,6 +47,60 @@ export async function sendText(to: string, body: string): Promise<string | undef
   return id;
 }
 
+/**
+ * Send an approved TEMPLATE message. Unlike free-form text, a template can be
+ * sent at any time — even when the 24-hour customer-service window has closed.
+ * We use it as a gentle "still there?" ping; once the user replies, the window
+ * reopens and normal messages flow again.
+ */
+export async function sendTemplate(
+  to: string,
+  templateName: string,
+  languageCode: string,
+  bodyParams: string[] = []
+): Promise<boolean> {
+  const components = bodyParams.length
+    ? [{ type: "body", parameters: bodyParams.map((text) => ({ type: "text", text })) }]
+    : [];
+  const res = await fetch(`${GRAPH}/${config.WHATSAPP_PHONE_NUMBER_ID}/messages`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      to,
+      type: "template",
+      template: { name: templateName, language: { code: languageCode }, components },
+    }),
+  });
+  if (!res.ok) {
+    logger.error("whatsapp template send failed", {
+      status: res.status,
+      body: await res.text(),
+      to,
+      templateName,
+    });
+    return false;
+  }
+  logger.info("whatsapp template sent", { to, templateName });
+  return true;
+}
+
+/**
+ * Is the 24-hour customer-service window open for this user? It opens whenever
+ * THEY message us. While open we can send free-form text; once closed, only an
+ * approved template can reach them.
+ */
+export async function isWindowOpen(authorKey: string): Promise<boolean> {
+  const res = await query<{ last: string | null }>(
+    `SELECT max(created_at) AS last FROM conversation_turns
+     WHERE author_key = $1 AND role = 'user'`,
+    [authorKey]
+  ).catch(() => ({ rows: [{ last: null }] }));
+  const last = res.rows[0]?.last;
+  if (!last) return false;
+  return Date.now() - new Date(last).getTime() < 24 * 60 * 60 * 1000;
+}
+
 /** Mark an inbound message as read (the blue ticks) so the user sees we got it. */
 export async function markRead(messageId: string): Promise<void> {
   try {

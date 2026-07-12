@@ -3,7 +3,7 @@ import { config } from "../config.js";
 import { logger } from "../logger.js";
 import { allUsers, getUser, type AuthorKey } from "../users.js";
 import { getMealPlan, isSettled, describePlan } from "../meals.js";
-import { sendText } from "../whatsapp/client.js";
+import { sendProactive } from "../whatsapp/proactive.js";
 
 /**
  * Daily 3pm check-in for TOMORROW's meals.
@@ -30,8 +30,8 @@ export async function runMealCheckin(): Promise<void> {
     const proposer = getUser(plan.proposedBy);
     const other = allUsers().find((u) => u.key !== plan.proposedBy);
     if (other) {
-      await sendText(
-        other.whatsapp,
+      await sendProactive(
+        other,
         `🍽️ ${proposer.name} has planned tomorrow (${pretty}):\n${describePlan(plan)}\n\nWorks for you? Reply "ok" to confirm, or suggest a change.`
       );
       logger.info("meal check-in: asked partner to confirm", { dateISO, asked: other.key });
@@ -41,8 +41,8 @@ export async function runMealCheckin(): Promise<void> {
 
   // 3) Nothing planned — ask both.
   for (const user of allUsers()) {
-    await sendText(
-      user.whatsapp,
+    await sendProactive(
+      user,
       `🍽️ What's the plan for tomorrow (${pretty})?\nBreakfast? And the lunch sabzi? (I'll assume dinner is the same as lunch unless you say otherwise.)`
     );
   }
@@ -60,8 +60,8 @@ export async function notifyPartnerOfPlan(
   if (!other) return;
   const proposer = getUser(proposedBy);
   const when = DateTime.fromISO(dateISO, { zone: config.TIMEZONE }).toFormat("cccc, dd LLL");
-  await sendText(
-    other.whatsapp,
+  await sendProactive(
+    other,
     `🍽️ ${proposer.name} planned meals for ${when}:\n${describePlan(plan)}\n\nOk with you? Reply "ok" to confirm, or suggest a change.`
   );
 }

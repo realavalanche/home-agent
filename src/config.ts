@@ -27,6 +27,9 @@ const schema = z.object({
   WHATSAPP_VERIFY_TOKEN: z.string().min(1),
   WHATSAPP_BUSINESS_ACCOUNT_ID: z.string().optional(),
   WHATSAPP_GRAPH_VERSION: z.string().default("v21.0"),
+  // Approved template used to re-engage when the 24h free-form window has closed.
+  WHATSAPP_CHECKIN_TEMPLATE: z.string().default("checkin_ping"),
+  WHATSAPP_TEMPLATE_LANG: z.string().default("en"),
 
   USER_A_NAME: z.string().default("User A"),
   USER_A_WHATSAPP: z.string().min(6),

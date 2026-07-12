@@ -5,7 +5,7 @@ import { logger } from "../logger.js";
 import { query } from "../db/pool.js";
 import { getUser, type AuthorKey } from "../users.js";
 import { createWeeklyReviewPage } from "../notion/log.js";
-import { sendText } from "../whatsapp/client.js";
+import { sendProactive } from "../whatsapp/proactive.js";
 
 const anthropic = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
 
@@ -71,6 +71,6 @@ Be specific and kind. Structure: 1) Highlights of the week, 2) Patterns you noti
     markdown: summary,
   });
 
-  await sendText(user.whatsapp, `🗓️ *Your week (${week})*\n\n${summary}`);
+  await sendProactive(user, `🗓️ *Your week (${week})*\n\n${summary}`);
   logger.info("weekly review delivered", { authorKey, count: rows.length });
 }

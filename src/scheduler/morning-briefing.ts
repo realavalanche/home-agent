@@ -7,7 +7,7 @@ import { getUser, type AuthorKey } from "../users.js";
 import { listOverdueTasks } from "../notion/log.js";
 import { listEvents } from "../google/calendar.js";
 import { isConnected } from "../google/auth.js";
-import { sendText } from "../whatsapp/client.js";
+import { sendProactive } from "../whatsapp/proactive.js";
 
 const anthropic = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
 
@@ -93,6 +93,6 @@ ${todayList || "(nothing scheduled)"}`,
     .join("\n")
     .trim();
 
-  await sendText(user.whatsapp, `☀️ ${text}`);
+  await sendProactive(user, `☀️ ${text}`);
   logger.info("morning briefing sent", { authorKey, overdue: overdue.length });
 }

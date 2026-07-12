@@ -14,7 +14,8 @@
     "migrate": "tsx src/db/migrate.ts",
     "setup:notion": "tsx scripts/setup-notion.ts",
     "auth:google": "tsx scripts/google-auth.ts",
-    "test:webhook": "tsx scripts/send-test-webhook.ts"
+    "test:webhook": "tsx scripts/send-test-webhook.ts",
+    "setup:template": "tsx scripts/create-template.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",
