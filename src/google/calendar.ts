@@ -1,5 +1,7 @@
 import { google } from "googleapis";
+import { DateTime } from "luxon";
 import { config } from "../config.js";
+import { logger } from "../logger.js";
 import { getAuthedClient } from "./auth.js";
 import type { AuthorKey } from "../users.js";
 
@@ -39,20 +41,61 @@ function addHour(iso: string): string {
 export async function createEvent(authorKey: AuthorKey, input: EventInput): Promise<CalResult> {
   const cal = await calendarFor(authorKey);
   if (!cal) return { ok: false, error: "not_connected" };
-  const res = await cal.events.insert({
-    calendarId: "primary",
-    requestBody: {
+
+  // Normalize + validate the times. Google rejects date-only values and any event
+  // whose end is not after its start — both easy to hit on flights (overnight /
+  // long-haul), which is why a hotel stay could succeed while a flight silently failed.
+  const start = DateTime.fromISO(input.startISO, { zone: config.TIMEZONE });
+  if (!start.isValid) {
+    return { ok: false, error: `invalid start time "${input.startISO}" (need full ISO 8601, e.g. 2026-07-20T02:30:00+05:30)` };
+  }
+  let end = input.endISO
+    ? DateTime.fromISO(input.endISO, { zone: config.TIMEZONE })
+    : start.plus({ hours: 1 });
+  if (!end.isValid) {
+    return { ok: false, error: `invalid end time "${input.endISO}"` };
+  }
+  if (end <= start) {
+    // Most common on overnight flights: the arrival date was omitted/mis-set.
+    end = start.plus({ hours: 2 });
+    logger.warn("calendar end <= start; defaulted to start+2h", {
       summary: input.summary,
-      description: input.description,
-      location: input.location,
-      start: { dateTime: input.startISO, timeZone: config.TIMEZONE },
-      end: { dateTime: input.endISO ?? addHour(input.startISO), timeZone: config.TIMEZONE },
-      reminders: input.reminderMinutes
-        ? { useDefault: false, overrides: [{ method: "popup", minutes: input.reminderMinutes }] }
-        : { useDefault: true },
-    },
-  });
-  return { ok: true, eventId: res.data.id ?? undefined, htmlLink: res.data.htmlLink ?? undefined };
+      start: input.startISO,
+      end: input.endISO,
+    });
+  }
+
+  try {
+    const res = await cal.events.insert({
+      calendarId: "primary",
+      requestBody: {
+        summary: input.summary,
+        description: input.description,
+        location: input.location,
+        start: { dateTime: start.toISO()!, timeZone: config.TIMEZONE },
+        end: { dateTime: end.toISO()!, timeZone: config.TIMEZONE },
+        reminders: input.reminderMinutes
+          ? { useDefault: false, overrides: [{ method: "popup", minutes: input.reminderMinutes }] }
+          : { useDefault: true },
+      },
+    });
+    logger.info("calendar event created", {
+      summary: input.summary,
+      start: start.toISO(),
+      end: end.toISO(),
+      id: res.data.id,
+    });
+    return { ok: true, eventId: res.data.id ?? undefined, htmlLink: res.data.htmlLink ?? undefined };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.error("calendar event creation FAILED", {
+      summary: input.summary,
+      start: start.toISO(),
+      end: end.toISO(),
+      err: message,
+    });
+    return { ok: false, error: message };
+  }
 }
 
 export async function updateEvent(

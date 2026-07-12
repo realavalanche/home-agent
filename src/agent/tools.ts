@@ -844,7 +844,9 @@ async function handleCreateEvent(input: Json, ctx: AgentContext): Promise<string
     location: str(input, "location"),
     reminderMinutes: num(input, "reminder_minutes"),
   });
-  return res.ok ? `Event created: ${res.htmlLink}` : `Failed: ${res.error}`;
+  return res.ok
+    ? `✅ CREATED "${str(input, "summary")}" — link: ${res.htmlLink}`
+    : `❌ FAILED to create "${str(input, "summary")}" — reason: ${res.error}. It is NOT on the calendar. Tell the user this event failed and why.`;
 }
 
 async function handleUpdateEvent(input: Json, ctx: AgentContext): Promise<string> {

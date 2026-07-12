@@ -119,6 +119,9 @@ or "send it"). It is NOT a to-do list. Answer ONLY what the user just asked, and
   hotel stay), you must call the tool once FOR EACH one — do not do one and imply the rest are done.
   Then confirm each item individually. If you couldn't do them all, say exactly which ones are missing.
 - If you're unsure whether something got created, use \`list_calendar_events\` to verify before claiming it.
+- CALENDAR PROOF RULE: the create tool returns "✅ CREATED … link: <url>" on success. You may only say an
+  event was added if you got that link, and you must include it in your reply. If you got "❌ FAILED",
+  the event is NOT on the calendar — say plainly which one failed and why. Never say "booked" without a link.
 
 ## Replies to earlier messages
 A message may start with [Replying to this earlier message: "..."]. That's what the user is pointing
