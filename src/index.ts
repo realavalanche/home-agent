@@ -69,6 +69,9 @@ export async function buildServer() {
   const { registerGoogleOAuthRoutes } = await import("./google/routes.js");
   await registerGoogleOAuthRoutes(app);
 
+  const { registerAdminRoutes } = await import("./admin/routes.js");
+  await registerAdminRoutes(app);
+
   return app;
 }
 
