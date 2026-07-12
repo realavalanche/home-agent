@@ -30,11 +30,11 @@ export async function startScheduler(): Promise<void> {
     for (const job of jobs) await dispatchScheduled(job.data.scheduledId);
   });
 
-  // 3) Weekly HOUSEHOLD review — one summary, delivered to both partners.
-  await boss.work(QUEUES.WEEKLY, async () => {
-    await runWeeklyReview();
+  // 3) Weekly review — PERSONAL to each partner (their own week + the shared
+  //    household picture). One job per user.
+  await boss.work<WeeklyJob>(QUEUES.WEEKLY, async (jobs: Job<WeeklyJob>[]) => {
+    for (const job of jobs) await runWeeklyReview(job.data.authorKey);
   });
-  await boss.schedule(QUEUES.WEEKLY, "0 21 * * 0", {}, { tz: config.TIMEZONE, key: "weekly-household" });
 
   // 4) Morning briefing (one per user).
   await boss.work<WeeklyJob>(QUEUES.MORNING, async (jobs: Job<WeeklyJob>[]) => {
@@ -53,16 +53,19 @@ export async function startScheduler(): Promise<void> {
   });
   await boss.schedule(QUEUES.MEAL_CHECKIN, "0 15 * * *", {}, { tz: config.TIMEZONE, key: "meal-checkin" });
 
-  // The weekly review used to be scheduled per-user (keys weekly-A / weekly-B).
-  // Those schedules persist in the DB, so remove them — otherwise they'd fire
-  // alongside the new household schedule and send the review multiple times.
-  for (const user of allUsers()) {
-    await boss.unschedule(QUEUES.WEEKLY, `weekly-${user.key}`).catch(() => {});
-  }
+  // Remove the short-lived household schedule; the review is per-person again.
+  await boss.unschedule(QUEUES.WEEKLY, "weekly-household").catch(() => {});
 
   // pg-boss cron is UTC unless tz is given; we pin it to the app timezone.
   for (const user of allUsers()) {
-    // Daily good-morning briefing at 06:30 IST (stays per-person).
+    // Sunday 21:00 IST → each partner's own weekly review.
+    await boss.schedule(
+      QUEUES.WEEKLY,
+      "0 21 * * 0",
+      { authorKey: user.key } satisfies WeeklyJob,
+      { tz: config.TIMEZONE, key: `weekly-${user.key}` }
+    );
+    // Daily good-morning briefing at 06:30 IST.
     await boss.schedule(
       QUEUES.MORNING,
       "30 6 * * *",
