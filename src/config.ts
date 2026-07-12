@@ -30,6 +30,9 @@ const schema = z.object({
   // Approved template used to re-engage when the 24h free-form window has closed.
   WHATSAPP_CHECKIN_TEMPLATE: z.string().default("checkin_ping"),
   WHATSAPP_TEMPLATE_LANG: z.string().default("en"),
+  // Ping this many hours after the user's last message, i.e. BEFORE WhatsApp's
+  // 24h window closes — so they have time to reply and keep it open.
+  WINDOW_KEEPALIVE_HOURS: z.coerce.number().default(23),
 
   USER_A_NAME: z.string().default("User A"),
   USER_A_WHATSAPP: z.string().min(6),

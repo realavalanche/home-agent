@@ -1,15 +1,15 @@
-import { config } from "../config.js";
 import { logger } from "../logger.js";
-import { sendText, sendTemplate, isWindowOpen } from "./client.js";
+import { sendText, isWindowOpen } from "./client.js";
+import { pingOnce } from "../scheduler/keepalive.js";
 import type { User } from "../users.js";
 
 /**
  * Send a business-INITIATED message (morning briefing, meal check-in, reminder).
  *
  * WhatsApp only allows free-form text within 24 hours of the user's last message.
- * If that window has closed, we can't send our text at all — so instead we send an
- * approved template ("just checking in") which IS allowed any time. The moment the
- * user replies, the window reopens and everything flows normally again.
+ * The hourly keep-alive normally pings them BEFORE that window closes, so it stays
+ * open. If we somehow still find it shut, the message can't be delivered — we log
+ * that plainly and fall back to a (de-duplicated) check-in ping.
  */
 export async function sendProactive(user: User, body: string): Promise<void> {
   if (await isWindowOpen(user.key)) {
@@ -17,16 +17,12 @@ export async function sendProactive(user: User, body: string): Promise<void> {
     return;
   }
 
-  logger.info("24h window closed — sending check-in template instead", { user: user.key });
-  const ok = await sendTemplate(
-    user.whatsapp,
-    config.WHATSAPP_CHECKIN_TEMPLATE,
-    config.WHATSAPP_TEMPLATE_LANG,
-    [user.name]
-  );
-  if (!ok) {
-    // Template not approved yet / misconfigured — try the text anyway so we at
-    // least surface the real error in the logs rather than staying silent.
-    await sendText(user.whatsapp, body);
-  }
+  // Window shut — this message can't be delivered. The hourly keep-alive should
+  // normally have pinged them before this happened; call it here as a backstop.
+  // pingOnce() de-duplicates, so we never blast repeated templates.
+  logger.warn("24h window closed — message not delivered", {
+    user: user.key,
+    preview: body.slice(0, 60),
+  });
+  await pingOnce(user);
 }

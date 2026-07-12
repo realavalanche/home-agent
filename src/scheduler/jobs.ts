@@ -11,6 +11,7 @@ import { runWeeklyReview } from "./weekly-review.js";
 import { runMorningBriefing } from "./morning-briefing.js";
 import { runNotionSync } from "./notion-sync.js";
 import { runMealCheckin } from "./meal-checkin.js";
+import { runKeepalive } from "./keepalive.js";
 import { allUsers } from "../users.js";
 
 /**
@@ -52,6 +53,13 @@ export async function startScheduler(): Promise<void> {
     await runMealCheckin();
   });
   await boss.schedule(QUEUES.MEAL_CHECKIN, "0 15 * * *", {}, { tz: config.TIMEZONE, key: "meal-checkin" });
+
+  // 7) Hourly keep-alive: ping before WhatsApp's 24h window closes, so the
+  //    briefings/reminders never get silently blocked.
+  await boss.work(QUEUES.KEEPALIVE, async () => {
+    await runKeepalive();
+  });
+  await boss.schedule(QUEUES.KEEPALIVE, "0 * * * *", {}, { tz: config.TIMEZONE, key: "keepalive" });
 
   // Remove the short-lived household schedule; the review is per-person again.
   await boss.unschedule(QUEUES.WEEKLY, "weekly-household").catch(() => {});

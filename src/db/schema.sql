@@ -27,6 +27,13 @@ CREATE INDEX IF NOT EXISTS captures_embedding_idx
 CREATE INDEX IF NOT EXISTS captures_author_created_idx
   ON captures (author_key, created_at DESC);
 
+-- Tracks the "still there?" ping we send before WhatsApp's 24h window closes, so
+-- we ping at most once per period of silence (never spam).
+CREATE TABLE IF NOT EXISTS keepalive_pings (
+  author_key   TEXT PRIMARY KEY,
+  last_ping_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- Shared meal plan, one row per date. Dinner defaults to lunch unless set.
 -- A plan is 'proposed' by one partner and becomes 'confirmed' once the other
 -- agrees — the 3pm check-in only asks when a date isn't settled yet.
