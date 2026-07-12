@@ -24,6 +24,7 @@ export interface IngestJob {
   text?: string; // for text messages
   mediaId?: string; // for voice notes, images, documents
   caption?: string; // optional caption on an image/document
+  quotedId?: string; // WhatsApp id of a message the user replied to (quoted)
   timestamp: number;
 }
 

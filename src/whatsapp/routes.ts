@@ -22,6 +22,9 @@ interface WebhookBody {
           audio?: { id: string };
           image?: { id: string; caption?: string };
           document?: { id: string; caption?: string; filename?: string };
+          // Present when the user REPLIES to (quotes) a message. Meta gives us
+          // only the quoted message's id — we resolve its text ourselves.
+          context?: { id?: string; from?: string };
         }>;
       };
     }>;
@@ -79,6 +82,7 @@ export async function registerWebhookRoutes(app: FastifyInstance) {
             waMessageId: msg.id,
             fromPhone: msg.from,
             timestamp: Number(msg.timestamp) * 1000 || Date.now(),
+            quotedId: msg.context?.id,
           };
           let job: IngestJob | undefined;
           if (msg.type === "text" && msg.text) {

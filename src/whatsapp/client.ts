@@ -1,5 +1,6 @@
 import { config } from "../config.js";
 import { logger } from "../logger.js";
+import { query } from "../db/pool.js";
 
 const GRAPH = `https://graph.facebook.com/${config.WHATSAPP_GRAPH_VERSION}`;
 
@@ -32,7 +33,18 @@ export async function sendText(to: string, body: string): Promise<string | undef
     return undefined;
   }
   const json = (await res.json()) as { messages?: { id: string }[] };
-  return json.messages?.[0]?.id;
+  const id = json.messages?.[0]?.id;
+
+  // Record what we sent, so if the user later REPLIES to this message we can
+  // resolve the quoted text (Meta's webhook only gives us the message id).
+  if (id) {
+    await query(
+      `INSERT INTO outbound_messages (wa_message_id, recipient, body)
+       VALUES ($1,$2,$3) ON CONFLICT (wa_message_id) DO NOTHING`,
+      [id, to, body]
+    ).catch((err) => logger.warn("outbound log failed", { err: String(err) }));
+  }
+  return id;
 }
 
 /** Mark an inbound message as read (the blue ticks) so the user sees we got it. */

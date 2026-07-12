@@ -1,4 +1,5 @@
 import { logger } from "./logger.js";
+import { query } from "./db/pool.js";
 import type { IngestJob } from "./queue.js";
 import { identifyUser } from "./users.js";
 import { downloadMedia } from "./whatsapp/media.js";
@@ -61,6 +62,15 @@ export async function processIngest(job: IngestJob): Promise<void> {
     language = looksHindi(transcript) ? "hi-IN" : "en-IN";
   }
 
+  // If the user REPLIED to a message, resolve what they quoted so "remind me
+  // about this" has something to point at.
+  if (job.quotedId) {
+    const quoted = await resolveQuoted(job.quotedId);
+    if (quoted) {
+      transcript = `[Replying to this earlier message: "${quoted}"]\n\n${transcript}`;
+    }
+  }
+
   const ctx: AgentContext = {
     user,
     waMessageId: job.waMessageId,
@@ -89,6 +99,24 @@ export async function processIngest(job: IngestJob): Promise<void> {
     );
   }
   void acked; // (ack is best-effort; final reply always follows)
+}
+
+/**
+ * Resolve the text of a message the user replied to. It may be one WE sent
+ * (a reply, reminder, or briefing) or one THEY sent earlier (a logged capture).
+ */
+async function resolveQuoted(quotedId: string): Promise<string | undefined> {
+  const ours = await query<{ body: string }>(
+    `SELECT body FROM outbound_messages WHERE wa_message_id = $1`,
+    [quotedId]
+  ).catch(() => ({ rows: [] as { body: string }[] }));
+  if (ours.rows[0]) return ours.rows[0].body;
+
+  const theirs = await query<{ transcript: string }>(
+    `SELECT transcript FROM captures WHERE wa_message_id = $1`,
+    [quotedId]
+  ).catch(() => ({ rows: [] as { transcript: string }[] }));
+  return theirs.rows[0]?.transcript;
 }
 
 /** Cheap heuristic: Devanagari or common Roman-Hindi tokens → treat as Hindi. */

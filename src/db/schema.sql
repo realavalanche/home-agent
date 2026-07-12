@@ -27,6 +27,16 @@ CREATE INDEX IF NOT EXISTS captures_embedding_idx
 CREATE INDEX IF NOT EXISTS captures_author_created_idx
   ON captures (author_key, created_at DESC);
 
+-- Every message WE send out (replies, reminders, briefings), keyed by its
+-- WhatsApp message id. Needed so that when the user REPLIES to one of our
+-- messages, we can resolve what they were quoting (Meta only sends the id).
+CREATE TABLE IF NOT EXISTS outbound_messages (
+  wa_message_id TEXT PRIMARY KEY,
+  recipient     TEXT NOT NULL,
+  body          TEXT NOT NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- Durable long-term facts the assistant should remember indefinitely: contact
 -- numbers, birthdays, addresses, preferences, important dates. Household-shared
 -- (both users). Embedded for semantic recall months later.
