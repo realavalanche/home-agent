@@ -3,36 +3,37 @@ import { DateTime } from "luxon";
 import { config } from "../config.js";
 import { logger } from "../logger.js";
 import { query } from "../db/pool.js";
-import { getUser, type AuthorKey } from "../users.js";
+import { allUsers } from "../users.js";
 import { createWeeklyReviewPage } from "../notion/log.js";
 import { sendProactive } from "../whatsapp/proactive.js";
 
 const anthropic = new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
 
 interface WeekRow {
+  author_name: string;
   category: string;
   transcript: string;
   language_code: string;
-  created_at: string;
 }
 
 /**
- * Build and deliver the Sunday-night review for one user: pull the last 7 days
- * of their captures, have Claude summarize highlights/patterns/suggestions in
- * the language they mostly used, then post to Notion + WhatsApp.
+ * Sunday-night HOUSEHOLD review, delivered to BOTH partners.
+ *
+ * It covers the whole household's week (each person's highlights, plus what they
+ * share — meals, family, shopping), so both of them see the same picture. Sending
+ * it only to whoever happened to capture notes meant the quieter partner never
+ * heard anything, which defeats the point of a shared assistant.
  */
-export async function runWeeklyReview(authorKey: AuthorKey): Promise<void> {
-  const user = getUser(authorKey);
+export async function runWeeklyReview(): Promise<void> {
   const res = await query<WeekRow>(
-    `SELECT category, transcript, language_code, created_at
+    `SELECT author_name, category, transcript, language_code
      FROM captures
-     WHERE author_key = $1 AND created_at >= now() - interval '7 days'
-     ORDER BY created_at ASC`,
-    [authorKey]
+     WHERE created_at >= now() - interval '7 days'
+     ORDER BY created_at ASC`
   );
   const rows = res.rows;
   if (!rows.length) {
-    logger.info("weekly review: no captures", { authorKey });
+    logger.info("weekly review: no captures for the household");
     return;
   }
 
@@ -42,20 +43,37 @@ export async function runWeeklyReview(authorKey: AuthorKey): Promise<void> {
       ? "Write in friendly Hinglish (Roman Hindi mixed with English)."
       : "Write in warm, simple English.";
 
-  const notes = rows
-    .map((r) => `- [${r.category}] ${r.transcript.slice(0, 300)}`)
-    .join("\n");
+  // Group the week's notes by person so the summary can speak to each of them.
+  const names = allUsers().map((u) => u.name);
+  const notes = names
+    .map((name) => {
+      const theirs = rows.filter((r) => r.author_name === name);
+      const body = theirs.length
+        ? theirs.map((r) => `  - [${r.category}] ${r.transcript.slice(0, 250)}`).join("\n")
+        : "  (nothing captured this week)";
+      return `${name}:\n${body}`;
+    })
+    .join("\n\n");
 
-  const week = `${DateTime.now().setZone(config.TIMEZONE).minus({ days: 7 }).toFormat("dd LLL")}–${DateTime.now().setZone(config.TIMEZONE).toFormat("dd LLL")}`;
+  const now = DateTime.now().setZone(config.TIMEZONE);
+  const week = `${now.minus({ days: 7 }).toFormat("dd LLL")}–${now.toFormat("dd LLL")}`;
 
   const msg = await anthropic.messages.create({
     model: config.CLAUDE_REVIEW_MODEL,
     max_tokens: 900,
-    system: `You are Home-Agent writing ${user.name}'s weekly review. ${langInstruction}
-Be specific and kind. Structure: 1) Highlights of the week, 2) Patterns you noticed,
-3) 2-3 gentle suggestions for next week. Keep it under ~200 words. No preamble.`,
+    system: `You are Home-Agent writing the weekly review for a household of two: ${names.join(" and ")}.
+This SAME message goes to BOTH of them, so address them together and speak about each by name.
+${langInstruction} Be specific, warm and kind — never corporate.
+
+Structure:
+1) Highlights of the household's week (mention each person's notable bits by name)
+2) Anything shared worth noting (meals, family/baby, shopping, plans they're both part of)
+3) 2-3 gentle suggestions for next week
+
+Only use what's given below. Do not invent events. If one person captured nothing, don't scold them —
+just focus on what actually happened. Keep it under ~220 words.`,
     messages: [
-      { role: "user", content: `Here are ${user.name}'s notes for ${week}:\n\n${notes}` },
+      { role: "user", content: `The household's notes for ${week}:\n\n${notes}` },
     ],
   });
 
@@ -65,12 +83,18 @@ Be specific and kind. Structure: 1) Highlights of the week, 2) Patterns you noti
     .join("\n")
     .trim();
 
-  await createWeeklyReviewPage({
-    title: `Weekly Review · ${user.name} · ${week}`,
-    authorName: user.name,
-    markdown: summary,
-  });
+  // One Notion record per person so it shows in each of their views.
+  for (const user of allUsers()) {
+    await createWeeklyReviewPage({
+      title: `Weekly Review · ${week}`,
+      authorName: user.name,
+      markdown: summary,
+    }).catch((err) => logger.warn("weekly review notion failed", { err: String(err) }));
+  }
 
-  await sendProactive(user, `🗓️ *Your week (${week})*\n\n${summary}`);
-  logger.info("weekly review delivered", { authorKey, count: rows.length });
+  // Deliver to BOTH partners.
+  for (const user of allUsers()) {
+    await sendProactive(user, `🗓️ *Our week (${week})*\n\n${summary}`);
+  }
+  logger.info("weekly review delivered to household", { count: rows.length });
 }
