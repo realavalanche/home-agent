@@ -93,7 +93,33 @@ async function dispatchScheduled(scheduledId: number): Promise<void> {
   );
   const row = res.rows[0];
   if (!row) return;
-  if (row.status !== "armed" && row.status !== "recurring") {
+
+  // ATOMICALLY claim this send before doing anything. If another attempt (a
+  // pg-boss retry, or a duplicate job) already claimed it, we get 0 rows and
+  // bail — a message can never be delivered twice.
+  if (row.status === "armed") {
+    const claim = await query(
+      `UPDATE scheduled_messages SET status = 'sent', last_fired_at = now()
+       WHERE id = $1 AND status = 'armed'`,
+      [scheduledId]
+    );
+    if (claim.rowCount === 0) {
+      logger.info("skip scheduled (already claimed)", { scheduledId });
+      return;
+    }
+  } else if (row.status === "recurring") {
+    // Recurring repeats, so we can't mark it sent — instead debounce: ignore a
+    // second fire within 60s of the last one.
+    const claim = await query(
+      `UPDATE scheduled_messages SET last_fired_at = now()
+       WHERE id = $1 AND (last_fired_at IS NULL OR last_fired_at < now() - interval '60 seconds')`,
+      [scheduledId]
+    );
+    if (claim.rowCount === 0) {
+      logger.info("skip scheduled (recurring debounce)", { scheduledId });
+      return;
+    }
+  } else {
     logger.info("skip scheduled", { scheduledId, status: row.status });
     return;
   }
@@ -101,21 +127,19 @@ async function dispatchScheduled(scheduledId: number): Promise<void> {
   // Urgent / "call me" / alarm reminders ring the phone. We still send the
   // WhatsApp text so there's a written record (and a fallback if the call fails).
   if (row.via_call && callingEnabled()) {
-    const call = await placeCall(row.recipient, row.body);
-    if (!call.ok) logger.warn("call failed, falling back to message", { scheduledId, err: call.error });
+    try {
+      const call = await placeCall(row.recipient, row.body);
+      if (!call.ok) logger.warn("call failed, message still sent", { scheduledId, err: call.error });
+    } catch (err) {
+      logger.warn("call threw, message still sent", { scheduledId, err: String(err) });
+    }
   }
   await sendText(row.recipient, row.body);
-  if (row.status === "recurring") {
-    await query(`UPDATE scheduled_messages SET last_fired_at = now() WHERE id = $1`, [scheduledId]);
-  } else {
-    await query(`UPDATE scheduled_messages SET status = 'sent', last_fired_at = now() WHERE id = $1`, [
-      scheduledId,
-    ]);
-    // A pure reminder is complete once delivered — close its task so it doesn't
-    // linger as overdue. (Family/vaccination nudges have auto_complete = false.)
-    if (row.auto_complete && row.notion_task_id) {
-      await markTaskDone(row.notion_task_id).catch(() => {});
-    }
+
+  // A pure reminder is complete once delivered — close its task so it doesn't
+  // linger as overdue. (Family/vaccination nudges have auto_complete = false.)
+  if (row.status === "armed" && row.auto_complete && row.notion_task_id) {
+    await markTaskDone(row.notion_task_id).catch(() => {});
   }
   logger.info("scheduled message sent", { scheduledId, to: row.recipient, recurring: row.status === "recurring" });
 }

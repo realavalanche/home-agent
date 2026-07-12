@@ -13,8 +13,8 @@ import type { AuthorKey } from "./users.js";
 // Kept tight: enough to follow an active back-and-forth (give a name, then a
 // number, then the text), but short enough that older, already-handled items
 // don't linger in context and get re-surfaced in unrelated replies.
-const MAX_TURNS = 12;
-const WINDOW_MINUTES = 60;
+const MAX_TURNS = 8;
+const WINDOW_MINUTES = 30;
 
 export interface Turn {
   role: "user" | "assistant";

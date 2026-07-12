@@ -709,6 +709,26 @@ async function handleReminder(input: Json, ctx: AgentContext): Promise<string> {
   const message = str(input, "message") ?? "";
   const when = str(input, "when_iso");
   if (!when) return "Missing when_iso.";
+
+  // Guard 1: never schedule in the past. A past time fires instantly, which is
+  // how a stale reminder from earlier in the conversation gets re-sent.
+  const whenDt = DateTime.fromISO(when, { zone: config.TIMEZONE });
+  if (!whenDt.isValid || whenDt <= DateTime.now().setZone(config.TIMEZONE)) {
+    return "That time is in the past — I did NOT schedule anything. Ask the user for the intended time.";
+  }
+
+  // Guard 2: don't re-create a reminder that already exists (the same text,
+  // still pending). This stops old reminders from being re-armed by mistake.
+  const dupe = await query(
+    `SELECT 1 FROM scheduled_messages
+     WHERE author_key = $1 AND kind = 'reminder' AND status IN ('armed','recurring')
+       AND body ILIKE $2`,
+    [ctx.user.key, message]
+  );
+  if (dupe.rowCount && dupe.rowCount > 0) {
+    return `A reminder for "${message}" is already scheduled — I did NOT create a duplicate.`;
+  }
+
   const viaCall = input.call === true;
   await scheduleReminder(ctx.user.key, ctx.user.name, ctx.user.whatsapp, message, when, viaCall);
   return viaCall
