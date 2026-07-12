@@ -3,6 +3,7 @@ import { config } from "../config.js";
 import { logger } from "../logger.js";
 import { verifySignature } from "./verify.js";
 import { enqueueIngest, type IngestJob } from "../queue.js";
+import { query } from "../db/pool.js";
 
 /**
  * Meta webhook shape (only the fields we use). A POST can carry multiple
@@ -25,6 +26,14 @@ interface WebhookBody {
           // Present when the user REPLIES to (quotes) a message. Meta gives us
           // only the quoted message's id — we resolve its text ourselves.
           context?: { id?: string; from?: string };
+        }>;
+        // Delivery/read receipts for messages WE sent.
+        statuses?: Array<{
+          id: string;
+          status: string; // sent | delivered | read | failed
+          timestamp?: string;
+          recipient_id?: string;
+          errors?: Array<{ code?: number; title?: string; message?: string }>;
         }>;
       };
     }>;
@@ -77,6 +86,17 @@ export async function registerWebhookRoutes(app: FastifyInstance) {
     const body = req.body as WebhookBody;
     for (const entry of body.entry ?? []) {
       for (const change of entry.changes ?? []) {
+        // Delivery/read receipts for our outbound messages.
+        for (const st of change.value?.statuses ?? []) {
+          const errText = st.errors?.map((e) => e.title ?? e.message).filter(Boolean).join("; ");
+          await query(
+            `UPDATE outbound_messages
+             SET status = $2, status_at = now(), error = COALESCE($3, error)
+             WHERE wa_message_id = $1`,
+            [st.id, st.status, errText || null]
+          ).catch((err) => logger.warn("status update failed", { err: String(err) }));
+        }
+
         for (const msg of change.value?.messages ?? []) {
           const base = {
             waMessageId: msg.id,

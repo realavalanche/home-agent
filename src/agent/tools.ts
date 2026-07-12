@@ -42,6 +42,7 @@ import { normalizePhone } from "../config.js";
 import { rememberFact, recallFacts } from "../facts.js";
 import { scheduleNudge } from "../scheduler/schedule.js";
 import { buildImmunizationSchedule } from "../family.js";
+import { query } from "../db/pool.js";
 import { DateTime } from "luxon";
 
 export interface AgentContext {
@@ -160,6 +161,18 @@ export const TOOLS: Anthropic.Tool[] = [
         dob_iso: { type: "string", description: "Child's date of birth, yyyy-mm-dd" },
       },
       required: ["child_name", "dob_iso"],
+    },
+  },
+  {
+    name: "check_message_status",
+    description:
+      "Check whether a message the assistant sent was delivered or read (e.g. 'did Arpita read my message?'). Match by recipient number and/or words from the message.",
+    input_schema: {
+      type: "object",
+      properties: {
+        recipient: { type: "string", description: "Phone digits, if known" },
+        match_text: { type: "string", description: "Words from the message" },
+      },
     },
   },
   {
@@ -370,6 +383,8 @@ export async function runTool(name: string, input: Json, ctx: AgentContext): Pro
         return await handleFamilyEvent(input, ctx);
       case "setup_vaccination_schedule":
         return await handleVaccinationSchedule(input, ctx);
+      case "check_message_status":
+        return await handleMessageStatus(input);
       case "list_calendar_events":
         return await handleListEvents(input, ctx);
       case "schedule_reminder":
@@ -567,6 +582,34 @@ async function handleRecall(input: Json): Promise<string> {
   const facts = await recallFacts(q, 5);
   if (!facts.length) return "I don't have anything stored about that.";
   return facts.map((f) => `- ${f.content}`).join("\n");
+}
+
+async function handleMessageStatus(input: Json): Promise<string> {
+  const recipient = normalizePhone(str(input, "recipient") ?? "");
+  const matchText = str(input, "match_text") ?? "";
+  const res = await query<{
+    recipient: string;
+    body: string;
+    status: string | null;
+    status_at: string | null;
+    error: string | null;
+  }>(
+    `SELECT recipient, body, status, status_at, error FROM outbound_messages
+     WHERE ($1 = '' OR recipient LIKE '%' || $1 || '%')
+       AND ($2 = '' OR body ILIKE '%' || $2 || '%')
+     ORDER BY created_at DESC LIMIT 3`,
+    [recipient, matchText]
+  );
+  if (!res.rows.length) return "I couldn't find a matching message I've sent.";
+  return res.rows
+    .map((r) => {
+      const st = r.status ?? "pending";
+      const label =
+        st === "read" ? "✅ read" : st === "delivered" ? "📬 delivered (not read yet)" :
+        st === "failed" ? `❌ failed${r.error ? ` (${r.error})` : ""}` : `sent (${st})`;
+      return `"${r.body.slice(0, 60)}" → ${r.recipient}: ${label}`;
+    })
+    .join("\n");
 }
 
 async function handleListEvents(input: Json, ctx: AgentContext): Promise<string> {

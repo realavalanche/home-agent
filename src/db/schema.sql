@@ -34,8 +34,14 @@ CREATE TABLE IF NOT EXISTS outbound_messages (
   wa_message_id TEXT PRIMARY KEY,
   recipient     TEXT NOT NULL,
   body          TEXT NOT NULL,
+  status        TEXT,            -- sent | delivered | read | failed (from Meta status webhooks)
+  status_at     TIMESTAMPTZ,
+  error         TEXT,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE outbound_messages ADD COLUMN IF NOT EXISTS status    TEXT;
+ALTER TABLE outbound_messages ADD COLUMN IF NOT EXISTS status_at TIMESTAMPTZ;
+ALTER TABLE outbound_messages ADD COLUMN IF NOT EXISTS error     TEXT;
 
 -- Durable long-term facts the assistant should remember indefinitely: contact
 -- numbers, birthdays, addresses, preferences, important dates. Household-shared
