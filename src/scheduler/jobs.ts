@@ -10,6 +10,7 @@ import { placeCall, callingEnabled } from "../call.js";
 import { runWeeklyReview } from "./weekly-review.js";
 import { runMorningBriefing } from "./morning-briefing.js";
 import { runNotionSync } from "./notion-sync.js";
+import { runMealCheckin } from "./meal-checkin.js";
 import { allUsers } from "../users.js";
 
 /**
@@ -44,6 +45,12 @@ export async function startScheduler(): Promise<void> {
     await runNotionSync();
   });
   await boss.schedule(QUEUES.NOTION_SYNC, "*/20 * * * *", {}, { tz: config.TIMEZONE, key: "notion-sync" });
+
+  // 6) Meal check-in for tomorrow, daily at 15:00 IST (skips if already settled).
+  await boss.work(QUEUES.MEAL_CHECKIN, async () => {
+    await runMealCheckin();
+  });
+  await boss.schedule(QUEUES.MEAL_CHECKIN, "0 15 * * *", {}, { tz: config.TIMEZONE, key: "meal-checkin" });
 
   // Cron: Sunday 21:00 IST → one weekly-review job per user (keyed schedules).
   // pg-boss cron is UTC unless tz is given; we pin it to the app timezone.

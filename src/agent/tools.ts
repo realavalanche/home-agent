@@ -42,6 +42,8 @@ import { normalizePhone } from "../config.js";
 import { rememberFact, recallFacts } from "../facts.js";
 import { scheduleNudge } from "../scheduler/schedule.js";
 import { buildImmunizationSchedule } from "../family.js";
+import { proposeMealPlan, confirmMealPlan, getMealPlans, describePlan } from "../meals.js";
+import { notifyPartnerOfPlan } from "../scheduler/meal-checkin.js";
 import { query } from "../db/pool.js";
 import { DateTime } from "luxon";
 
@@ -161,6 +163,43 @@ export const TOOLS: Anthropic.Tool[] = [
         dob_iso: { type: "string", description: "Child's date of birth, yyyy-mm-dd" },
       },
       required: ["child_name", "dob_iso"],
+    },
+  },
+  {
+    name: "set_meal_plan",
+    description:
+      "Record the meal plan for a date (breakfast, lunch sabzi, optionally dinner). Dinner defaults to the same as lunch. Automatically shares it with the partner to confirm. Call once PER DATE if planning several days.",
+    input_schema: {
+      type: "object",
+      properties: {
+        date_iso: { type: "string", description: "The date being planned, yyyy-mm-dd" },
+        breakfast: { type: "string" },
+        lunch: { type: "string", description: "The lunch sabzi" },
+        dinner: { type: "string", description: "Only if different from lunch" },
+      },
+      required: ["date_iso"],
+    },
+  },
+  {
+    name: "confirm_meal_plan",
+    description:
+      "The user agrees with the meal plan their partner proposed for a date ('ok', 'sounds good', 'yes'). Settles it so the 3pm check-in stops asking.",
+    input_schema: {
+      type: "object",
+      properties: { date_iso: { type: "string", description: "yyyy-mm-dd" } },
+      required: ["date_iso"],
+    },
+  },
+  {
+    name: "get_meal_plan",
+    description: "Look up the planned meals for a date range (e.g. 'what are we eating tomorrow?').",
+    input_schema: {
+      type: "object",
+      properties: {
+        from_iso: { type: "string", description: "yyyy-mm-dd" },
+        to_iso: { type: "string", description: "yyyy-mm-dd (same as from for a single day)" },
+      },
+      required: ["from_iso", "to_iso"],
     },
   },
   {
@@ -388,6 +427,12 @@ export async function runTool(name: string, input: Json, ctx: AgentContext): Pro
         return await handleFamilyEvent(input, ctx);
       case "setup_vaccination_schedule":
         return await handleVaccinationSchedule(input, ctx);
+      case "set_meal_plan":
+        return await handleSetMealPlan(input, ctx);
+      case "confirm_meal_plan":
+        return await handleConfirmMealPlan(input, ctx);
+      case "get_meal_plan":
+        return await handleGetMealPlan(input);
       case "check_message_status":
         return await handleMessageStatus(input);
       case "list_calendar_events":
@@ -587,6 +632,37 @@ async function handleRecall(input: Json): Promise<string> {
   const facts = await recallFacts(q, 5);
   if (!facts.length) return "I don't have anything stored about that.";
   return facts.map((f) => `- ${f.content}`).join("\n");
+}
+
+async function handleSetMealPlan(input: Json, ctx: AgentContext): Promise<string> {
+  const date = str(input, "date_iso");
+  if (!date) return "Which date is this for?";
+  const plan = await proposeMealPlan(date, ctx.user.key, {
+    breakfast: str(input, "breakfast"),
+    lunch: str(input, "lunch"),
+    dinner: str(input, "dinner"),
+  });
+  // Share it with the partner so they can agree (that's what settles it).
+  await notifyPartnerOfPlan(ctx.user.key, date).catch(() => {});
+  return `Saved for ${date}: ${describePlan(plan)}. I've shared it with your partner to confirm.`;
+}
+
+async function handleConfirmMealPlan(input: Json, ctx: AgentContext): Promise<string> {
+  const date = str(input, "date_iso");
+  if (!date) return "Which date are you confirming?";
+  const plan = await confirmMealPlan(date, ctx.user.key);
+  if (!plan) return `There's no plan saved for ${date} yet.`;
+  return `Confirmed for ${date}: ${describePlan(plan)}. Settled — I won't ask again.`;
+}
+
+async function handleGetMealPlan(input: Json): Promise<string> {
+  const from = str(input, "from_iso") ?? "";
+  const to = str(input, "to_iso") ?? from;
+  const plans = await getMealPlans(from, to);
+  if (!plans.length) return "Nothing planned for those dates yet.";
+  return plans
+    .map((p) => `${p.planDate}${p.status === "confirmed" ? " ✅" : " (awaiting confirmation)"}: ${describePlan(p)}`)
+    .join("\n");
 }
 
 async function handleMessageStatus(input: Json): Promise<string> {

@@ -27,6 +27,20 @@ CREATE INDEX IF NOT EXISTS captures_embedding_idx
 CREATE INDEX IF NOT EXISTS captures_author_created_idx
   ON captures (author_key, created_at DESC);
 
+-- Shared meal plan, one row per date. Dinner defaults to lunch unless set.
+-- A plan is 'proposed' by one partner and becomes 'confirmed' once the other
+-- agrees — the 3pm check-in only asks when a date isn't settled yet.
+CREATE TABLE IF NOT EXISTS meal_plans (
+  plan_date    DATE PRIMARY KEY,
+  breakfast    TEXT,
+  lunch        TEXT,            -- the sabzi
+  dinner       TEXT,            -- NULL => same as lunch
+  proposed_by  TEXT,            -- 'A' | 'B'
+  confirmed_by TEXT,            -- 'A' | 'B' (the partner who agreed)
+  status       TEXT NOT NULL DEFAULT 'proposed', -- proposed | confirmed
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- Every message WE send out (replies, reminders, briefings), keyed by its
 -- WhatsApp message id. Needed so that when the user REPLIES to one of our
 -- messages, we can resolve what they were quoting (Meta only sends the id).
