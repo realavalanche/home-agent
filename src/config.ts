@@ -53,6 +53,12 @@ const schema = z.object({
   SARVAM_API_KEY: z.string().min(1),
   VOYAGE_API_KEY: z.string().min(1),
 
+  // Bolna voice calls (optional). Without these, "call me" reminders fall back
+  // to a WhatsApp message.
+  BOLNA_API_KEY: z.string().optional(),
+  BOLNA_AGENT_ID: z.string().optional(),
+  BOLNA_FROM_NUMBER: z.string().optional(),
+
   CLAUDE_AGENT_MODEL: z.string().default("claude-sonnet-5"),
   CLAUDE_REVIEW_MODEL: z.string().default("claude-opus-4-8"),
   VOYAGE_MODEL: z.string().default("voyage-3"),

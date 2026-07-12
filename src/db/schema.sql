@@ -108,3 +108,5 @@ ALTER TABLE scheduled_messages ADD COLUMN IF NOT EXISTS last_fired_at TIMESTAMPT
 -- Pure reminders auto-complete their linked task once fired (a nudge is done when
 -- delivered). Family/vaccination nudges keep their task open.
 ALTER TABLE scheduled_messages ADD COLUMN IF NOT EXISTS auto_complete BOOLEAN NOT NULL DEFAULT false;
+-- Urgent / "call me" / alarm-style reminders ring the phone instead of just messaging.
+ALTER TABLE scheduled_messages ADD COLUMN IF NOT EXISTS via_call BOOLEAN NOT NULL DEFAULT false;

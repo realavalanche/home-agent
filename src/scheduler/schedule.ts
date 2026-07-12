@@ -26,12 +26,13 @@ async function insertRow(
     recurrence?: string;
     scheduleKey?: string;
     autoComplete?: boolean;
+    viaCall?: boolean;
   } = {}
 ): Promise<number> {
   const res = await query<{ id: number }>(
     `INSERT INTO scheduled_messages
-       (author_key, recipient, body, send_at, kind, status, notion_task_id, recurrence, schedule_key, auto_complete)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+       (author_key, recipient, body, send_at, kind, status, notion_task_id, recurrence, schedule_key, auto_complete, via_call)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
     [
       authorKey,
       recipient,
@@ -43,6 +44,7 @@ async function insertRow(
       extra.recurrence ?? null,
       extra.scheduleKey ?? null,
       extra.autoComplete ?? false,
+      extra.viaCall ?? false,
     ]
   );
   return res.rows[0]!.id;
@@ -71,7 +73,8 @@ export async function scheduleReminder(
   authorName: string,
   recipient: string,
   body: string,
-  sendAtISO: string
+  sendAtISO: string,
+  viaCall = false
 ): Promise<number> {
   let notionTaskId: string | undefined;
   try {
@@ -81,6 +84,8 @@ export async function scheduleReminder(
   }
   const id = await insertRow(authorKey, recipient, body, sendAtISO, "reminder", "armed", {
     notionTaskId,
+    autoComplete: true, // a pure reminder's job is done once it fires
+    viaCall,
   });
   await armJob(id, sendAtISO);
   return id;
@@ -88,7 +93,9 @@ export async function scheduleReminder(
 
 /**
  * A one-time WhatsApp nudge linked to an ALREADY-created Notion task (used by
- * the family tracker, which makes its own Family tasks). No new task is created.
+ * the family tracker, which makes its own Family tasks). No new task is created,
+ * and the task is NOT auto-completed — being reminded about a vaccine doesn't
+ * mean it was given.
  */
 export async function scheduleNudge(
   authorKey: AuthorKey,
@@ -99,7 +106,7 @@ export async function scheduleNudge(
 ): Promise<number> {
   const id = await insertRow(authorKey, recipient, body, sendAtISO, "reminder", "armed", {
     notionTaskId,
-    autoComplete: true, // a pure reminder is done once it fires
+    autoComplete: false,
   });
   await armJob(id, sendAtISO);
   return id;

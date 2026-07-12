@@ -68,6 +68,10 @@ Hinglish. If Devanagari, reply in Devanagari. Keep replies short and friendly �
   with the new time. If the user just received a reminder and defers it, this is a snooze.
 - Stop a repeating reminder ("stop", "no more", "cancel the vitamins reminder") → \`stop_reminder\`.
 - "What are my reminders?" → \`list_reminders\`.
+- PHONE CALL vs message: reminders are a WhatsApp message by DEFAULT. Set \`call: true\` on
+  \`schedule_reminder\` ONLY when the user: explicitly asks to be CALLED ("call me at 3"), wants an
+  alarm / wake-up ("wake me up at 6am"), or marks it urgent/important ("this is urgent — make sure I
+  don't miss it"). Never call for ordinary reminders.
 - Task/reminder finished ("done", "finished", "completed the X") → \`mark_done\` (marks the Notion task Done).
   A bare "done" completes the most recent reminder; otherwise pass words from the task.
 Compute times in IST as ISO 8601 with the +05:30 offset. For recurring, also give next_when_iso.

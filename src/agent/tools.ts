@@ -189,12 +189,17 @@ export const TOOLS: Anthropic.Tool[] = [
   },
   {
     name: "schedule_reminder",
-    description: "Schedule a WhatsApp reminder back to THIS user at a future time.",
+    description:
+      "Schedule a reminder back to THIS user at a future time. Set call=true ONLY if they asked to be CALLED, said it's urgent/important, or want an alarm/wake-up — otherwise it's a WhatsApp message.",
     input_schema: {
       type: "object",
       properties: {
         message: { type: "string" },
         when_iso: { type: "string", description: "ISO 8601 with +05:30 offset" },
+        call: {
+          type: "boolean",
+          description: "Ring their phone (alarm/urgent/explicit 'call me'). Default false.",
+        },
       },
       required: ["message", "when_iso"],
     },
@@ -628,8 +633,11 @@ async function handleReminder(input: Json, ctx: AgentContext): Promise<string> {
   const message = str(input, "message") ?? "";
   const when = str(input, "when_iso");
   if (!when) return "Missing when_iso.";
-  await scheduleReminder(ctx.user.key, ctx.user.name, ctx.user.whatsapp, message, when);
-  return `Reminder set for ${when} and added to your Tasks in Notion. You can postpone it anytime by replying.`;
+  const viaCall = input.call === true;
+  await scheduleReminder(ctx.user.key, ctx.user.name, ctx.user.whatsapp, message, when, viaCall);
+  return viaCall
+    ? `Set for ${when} — I'll CALL your phone (and message you too).`
+    : `Reminder set for ${when} and added to your Tasks in Notion. You can postpone it anytime by replying.`;
 }
 
 /** Build a 5-field cron (min hour * * dow) in app timezone from simple inputs. */

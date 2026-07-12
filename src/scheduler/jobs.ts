@@ -6,6 +6,7 @@ import { query } from "../db/pool.js";
 import { processIngest } from "../ingest.js";
 import { sendText } from "../whatsapp/client.js";
 import { markTaskDone } from "../notion/log.js";
+import { placeCall, callingEnabled } from "../call.js";
 import { runWeeklyReview } from "./weekly-review.js";
 import { runMorningBriefing } from "./morning-briefing.js";
 import { runNotionSync } from "./notion-sync.js";
@@ -77,8 +78,9 @@ async function dispatchScheduled(scheduledId: number): Promise<void> {
     status: string;
     notion_task_id: string | null;
     auto_complete: boolean;
+    via_call: boolean;
   }>(
-    `SELECT recipient, body, status, notion_task_id, auto_complete
+    `SELECT recipient, body, status, notion_task_id, auto_complete, via_call
      FROM scheduled_messages WHERE id = $1`,
     [scheduledId]
   );
@@ -87,6 +89,13 @@ async function dispatchScheduled(scheduledId: number): Promise<void> {
   if (row.status !== "armed" && row.status !== "recurring") {
     logger.info("skip scheduled", { scheduledId, status: row.status });
     return;
+  }
+
+  // Urgent / "call me" / alarm reminders ring the phone. We still send the
+  // WhatsApp text so there's a written record (and a fallback if the call fails).
+  if (row.via_call && callingEnabled()) {
+    const call = await placeCall(row.recipient, row.body);
+    if (!call.ok) logger.warn("call failed, falling back to message", { scheduledId, err: call.error });
   }
   await sendText(row.recipient, row.body);
   if (row.status === "recurring") {
