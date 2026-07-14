@@ -34,6 +34,13 @@ export async function runAgent(ctx: AgentContext): Promise<string> {
 
   const reply = await runLoop(ctx, system, messages);
 
+  logger.info("agent run complete", {
+    waMessageId: ctx.waMessageId,
+    user: ctx.user.key,
+    source: ctx.source,
+    replyChars: reply.length,
+  });
+
   // Persist this exchange as the newest turns (best-effort).
   await saveTurns(ctx.user.key, ctx.transcript, reply).catch(() => {});
   return reply;
@@ -45,6 +52,8 @@ async function runLoop(
   system: string,
   messages: Anthropic.MessageParam[]
 ): Promise<string> {
+  const toolsUsed: string[] = [];
+
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     const res = await anthropic.messages.create({
       model: config.CLAUDE_AGENT_MODEL,
@@ -57,13 +66,25 @@ async function runLoop(
     messages.push({ role: "assistant", content: res.content });
 
     if (res.stop_reason !== "tool_use") {
-      return extractText(res.content) || defaultAck(ctx);
+      const text = extractText(res.content);
+      if (text) return text;
+
+      // The model finished but said NOTHING. Never dress this up as success —
+      // reporting "Done ✅" when nothing happened is worse than admitting it.
+      logger.error("agent produced no reply text", {
+        waMessageId: ctx.waMessageId,
+        stopReason: res.stop_reason,
+        turn,
+        toolsUsed,
+      });
+      return noReply(ctx, toolsUsed);
     }
 
     // Execute every tool_use block and feed results back.
     const toolResults: Anthropic.ToolResultBlockParam[] = [];
     for (const block of res.content) {
       if (block.type === "tool_use") {
+        toolsUsed.push(block.name);
         const output = await runTool(block.name, block.input as Record<string, unknown>, ctx);
         toolResults.push({
           type: "tool_result",
@@ -75,8 +96,30 @@ async function runLoop(
     messages.push({ role: "user", content: toolResults });
   }
 
-  logger.warn("agent hit max turns", { waMessageId: ctx.waMessageId });
-  return defaultAck(ctx);
+  logger.error("agent hit max turns without replying", {
+    waMessageId: ctx.waMessageId,
+    toolsUsed,
+  });
+  return ctx.language.startsWith("hi")
+    ? "Sorry, main is par atak gaya aur poora nahi kar paya. 🙏 Thoda simple karke phir se bhejein?"
+    : "Sorry — I got tangled up on that one and didn't finish it. 🙏 Could you send it again, maybe a bit simpler?";
+}
+
+/**
+ * The model returned no text. Be honest about it — and say whether anything
+ * actually happened, so the user isn't left believing a request went through
+ * when it didn't.
+ */
+function noReply(ctx: AgentContext, toolsUsed: string[]): string {
+  const hi = ctx.language.startsWith("hi");
+  if (toolsUsed.length === 0) {
+    return hi
+      ? "Sorry, main samajh nahi paya aur kuch kar bhi nahi paya. 🙏 Ek baar phir se bataayein?"
+      : "Sorry — I didn't catch that and I haven't done anything with it. 🙏 Could you say it again?";
+  }
+  return hi
+    ? "Maine kuch steps liye lekin theek se poora nahi kar paya. 🙏 Kya aap phir se bata sakte hain?"
+    : "I started on that but couldn't finish it properly — so please don't assume it went through. 🙏 Mind trying again?";
 }
 
 function extractText(content: Anthropic.ContentBlock[]): string {
@@ -87,6 +130,3 @@ function extractText(content: Anthropic.ContentBlock[]): string {
     .trim();
 }
 
-function defaultAck(ctx: AgentContext): string {
-  return ctx.language.startsWith("hi") ? "Ho gaya ✅" : "Done ✅";
-}
