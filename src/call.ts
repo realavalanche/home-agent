@@ -26,6 +26,7 @@ export interface PlaceCallInput {
   toPhoneDigits: string;
   purpose: CallPurpose;
   instruction: string; // what the voice agent should actually do on the call
+  greeting: string; // the exact opening line (differs per purpose AND per person)
   authorKey: AuthorKey;
   context?: string; // the reminder text / the task, for the webhook to reference
   name?: string;
@@ -42,6 +43,7 @@ export async function placeCall(
     recipient_phone_number: to,
     user_data: {
       name: input.name ?? "",
+      greeting: input.greeting,
       instruction: input.instruction,
       purpose: input.purpose,
     },
@@ -82,6 +84,18 @@ export async function placeCall(
   logger.info("bolna call placed", { to, purpose: input.purpose, executionId });
   return { ok: true, executionId };
 }
+
+/**
+ * The opening line for each kind of call. This MUST vary by purpose: on an
+ * outbound call we're greeting a stranger (the electrician), NOT the household
+ * member — so we can't just say "Hi <user>".
+ */
+export const GREETINGS = {
+  reminder: (name: string) => `Hi ${name}, it's your assistant with a quick reminder.`,
+  capture: (name: string) =>
+    `Hi ${name}, it's your assistant. Whenever you're ready — what's on your mind?`,
+  outbound: (onBehalfOf: string) => `Hello! I'm calling on behalf of ${onBehalfOf}.`,
+} as const;
 
 /** Instruction text for each kind of call. Kept here so it's easy to tune. */
 export const INSTRUCTIONS = {

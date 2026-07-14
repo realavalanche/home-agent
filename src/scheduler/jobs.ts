@@ -6,7 +6,7 @@ import { query } from "../db/pool.js";
 import { processIngest } from "../ingest.js";
 import { sendText } from "../whatsapp/client.js";
 import { markTaskDone } from "../notion/log.js";
-import { placeCall, callingEnabled, INSTRUCTIONS } from "../call.js";
+import { placeCall, callingEnabled, INSTRUCTIONS, GREETINGS } from "../call.js";
 import type { AuthorKey } from "../users.js";
 import { runWeeklyReview } from "./weekly-review.js";
 import { runMorningBriefing } from "./morning-briefing.js";
@@ -160,6 +160,7 @@ async function dispatchScheduled(scheduledId: number): Promise<void> {
         toPhoneDigits: row.recipient,
         purpose: "capture",
         instruction: INSTRUCTIONS.capture(user.name),
+        greeting: GREETINGS.capture(user.name),
         authorKey: user.key,
         context: "hands-free capture call",
         name: user.name,
@@ -172,12 +173,15 @@ async function dispatchScheduled(scheduledId: number): Promise<void> {
   // WhatsApp text so there's a written record (and a fallback if the call fails).
   if (row.via_call && callingEnabled()) {
     try {
+      const user = getUser(row.author_key as AuthorKey);
       const call = await placeCall({
         toPhoneDigits: row.recipient,
         purpose: "reminder",
         instruction: INSTRUCTIONS.reminder(row.body),
-        authorKey: row.author_key as AuthorKey,
+        greeting: GREETINGS.reminder(user.name),
+        authorKey: user.key,
         context: row.body,
+        name: user.name,
       });
       if (!call.ok) logger.warn("call failed, message still sent", { scheduledId, err: call.error });
     } catch (err) {
@@ -241,11 +245,14 @@ async function escalateIfUnread(scheduledId: number): Promise<void> {
     logger.warn("escalation wanted but calling not configured", { scheduledId });
     return;
   }
+  const escUser = getUser(row.author_key as AuthorKey);
   await placeCall({
     toPhoneDigits: row.recipient,
     purpose: "reminder",
     instruction: INSTRUCTIONS.reminder(row.body),
-    authorKey: row.author_key as AuthorKey,
+    greeting: GREETINGS.reminder(escUser.name),
+    authorKey: escUser.key,
     context: row.body,
+    name: escUser.name,
   }).catch((err) => logger.error("escalation call failed", { scheduledId, err: String(err) }));
 }

@@ -42,7 +42,7 @@ import { normalizePhone } from "../config.js";
 import { rememberFact, recallFacts } from "../facts.js";
 import { scheduleNudge } from "../scheduler/schedule.js";
 import { buildImmunizationSchedule } from "../family.js";
-import { placeCall, callingEnabled, INSTRUCTIONS } from "../call.js";
+import { placeCall, callingEnabled, INSTRUCTIONS, GREETINGS } from "../call.js";
 import { proposeMealPlan, confirmMealPlan, getMealPlans, describePlan } from "../meals.js";
 import { notifyPartnerOfPlan } from "../scheduler/meal-checkin.js";
 import { query } from "../db/pool.js";
@@ -749,6 +749,7 @@ async function handleConfirmCallPerson(ctx: AgentContext): Promise<string> {
     toPhoneDigits: pending.phone,
     purpose: "outbound",
     instruction: INSTRUCTIONS.outbound(ctx.user.name, pending.task),
+    greeting: GREETINGS.outbound(ctx.user.name),
     authorKey: ctx.user.key,
     context: pending.task,
     name: ctx.user.name,
