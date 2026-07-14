@@ -12,6 +12,20 @@ import type { AuthorKey } from "../users.js";
  *   jobs: weekly | morning | meal | notion-sync
  */
 export async function registerAdminRoutes(app: FastifyInstance) {
+  /** Inspect recent voice calls — did we actually place one, and what happened? */
+  app.get("/admin/calls", async (req, reply) => {
+    const q = req.query as Record<string, string>;
+    if (q.token !== config.WHATSAPP_VERIFY_TOKEN) {
+      return reply.code(401).send({ ok: false, error: "unauthorized" });
+    }
+    const { query } = await import("../db/pool.js");
+    const res = await query(
+      `SELECT execution_id, author_key, purpose, context, recipient, status, processed, created_at
+       FROM calls ORDER BY created_at DESC LIMIT 15`
+    );
+    return { ok: true, count: res.rowCount, calls: res.rows };
+  });
+
   app.post("/admin/run", async (req, reply) => {
     const q = req.query as Record<string, string>;
     if (q.token !== config.WHATSAPP_VERIFY_TOKEN) {
