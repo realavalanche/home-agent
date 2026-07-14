@@ -43,6 +43,7 @@ import { rememberFact, recallFacts } from "../facts.js";
 import { scheduleNudge } from "../scheduler/schedule.js";
 import { buildImmunizationSchedule } from "../family.js";
 import { placeCall, callingEnabled, INSTRUCTIONS, GREETINGS } from "../call.js";
+import { allUsers } from "../users.js";
 import { proposeMealPlan, confirmMealPlan, getMealPlans, describePlan } from "../meals.js";
 import { notifyPartnerOfPlan } from "../scheduler/meal-checkin.js";
 import { query } from "../db/pool.js";
@@ -745,7 +746,21 @@ async function handleConfirmCallPerson(ctx: AgentContext): Promise<string> {
   const pending = pendingCalls.get(ctx.user.key);
   if (!pending) return "There's no call waiting to be confirmed.";
   pendingCalls.delete(ctx.user.key);
-  const res = await placeCall({
+
+  // Calling the other member of the household? Make it a warm family call rather
+  // than a cold "I'm calling on behalf of..." business call.
+  const household = allUsers().find((u) => u.whatsapp === pending.phone && u.key !== ctx.user.key);
+  const res = household
+    ? await placeCall({
+        toPhoneDigits: pending.phone,
+        purpose: "partner",
+        instruction: INSTRUCTIONS.partner(household.name, ctx.user.name, pending.task),
+        greeting: GREETINGS.partner(household.name, ctx.user.name),
+        authorKey: ctx.user.key,
+        context: pending.task,
+        name: household.name,
+      })
+    : await placeCall({
     toPhoneDigits: pending.phone,
     purpose: "outbound",
     instruction: INSTRUCTIONS.outbound(ctx.user.name, pending.task),

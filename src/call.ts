@@ -16,7 +16,7 @@ import type { AuthorKey } from "./users.js";
  * Every call is recorded so the post-call webhook knows why it happened and can
  * act on the transcript.
  */
-export type CallPurpose = "reminder" | "capture" | "outbound";
+export type CallPurpose = "reminder" | "capture" | "outbound" | "partner";
 
 export function callingEnabled(): boolean {
   return Boolean(config.BOLNA_API_KEY && config.BOLNA_AGENT_ID);
@@ -95,6 +95,9 @@ export const GREETINGS = {
   capture: (name: string) =>
     `Hi ${name}, it's your assistant. Whenever you're ready — what's on your mind?`,
   outbound: (onBehalfOf: string) => `Hello! I'm calling on behalf of ${onBehalfOf}.`,
+  // Calling the other partner is a household call, not a cold business call.
+  partner: (toName: string, fromName: string) =>
+    `Hi ${toName}! It's the home assistant — ${fromName} asked me to pass on a message.`,
 } as const;
 
 /** Instruction text for each kind of call. Kept here so it's easy to tune. */
@@ -107,6 +110,12 @@ export const INSTRUCTIONS = {
     `Greet them briefly, then ask: "What's on your mind?" Then LISTEN. Let them talk freely without interrupting. ` +
     `If they pause, gently ask "anything else?". Do not give advice or opinions — you are only here to capture. ` +
     `When they say they're done, confirm you've got it all, tell them you'll save it, and END the call.`,
+
+  partner: (toName: string, fromName: string, message: string) =>
+    `You are the household assistant calling ${toName} with a message from ${fromName}. ` +
+    `Warmly and clearly tell her: "${message}". Speak naturally — this is family, not a business call. ` +
+    `If she replies in Hindi or Hinglish, respond in the same language. Make sure she has understood, ` +
+    `briefly answer any question about the message, then thank her and END the call. Keep it under a minute.`,
 
   outbound: (onBehalfOf: string, task: string) =>
     `You are a polite assistant calling on behalf of ${onBehalfOf}. Your task: ${task}. ` +

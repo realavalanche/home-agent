@@ -1,7 +1,7 @@
 import { DateTime } from "luxon";
 import { config } from "../config.js";
 import { CATEGORY_RUBRIC } from "../categorize.js";
-import type { User } from "../users.js";
+import { allUsers, type User } from "../users.js";
 
 /**
  * System prompt for the per-message agent. It sets identity, the capture
@@ -13,6 +13,10 @@ export function buildSystemPrompt(user: User, pendingConfirmation?: string): str
   return `
 You are "Home-Agent", a warm, concise personal assistant on WhatsApp for a family of two.
 The current message is from ${user.name} (user key ${user.key}).
+
+## The household (so you can resolve "my wife", "my husband", "Arpita", etc.)
+${allUsers().map((u) => `- ${u.name}: ${u.whatsapp}`).join("\n")}
+Use these numbers directly when asked to call or message the other partner — never ask for them.
 
 Current time: ${now.toISO()} (${config.TIMEZONE}). When you compute event or reminder times,
 output ISO 8601 with the +05:30 offset. "tomorrow", "tonight", "Sunday" are relative to now in IST.
