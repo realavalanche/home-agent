@@ -26,6 +26,40 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     return { ok: true, count: res.rowCount, calls: res.rows };
   });
 
+  /** Recent activity across the pipeline — for diagnosing "nothing happened". */
+  app.get("/admin/recent", async (req, reply) => {
+    const q = req.query as Record<string, string>;
+    if (q.token !== config.WHATSAPP_VERIFY_TOKEN) {
+      return reply.code(401).send({ ok: false, error: "unauthorized" });
+    }
+    const { query } = await import("../db/pool.js");
+    const [turns, caps, sched, out] = await Promise.all([
+      query(
+        `SELECT author_key, role, left(content, 160) AS content, created_at
+         FROM conversation_turns ORDER BY created_at DESC LIMIT 12`
+      ),
+      query(
+        `SELECT author_key, source, category, left(transcript, 140) AS transcript, created_at
+         FROM captures ORDER BY created_at DESC LIMIT 8`
+      ),
+      query(
+        `SELECT id, author_key, kind, status, recipient, left(body, 90) AS body, send_at, created_at
+         FROM scheduled_messages ORDER BY created_at DESC LIMIT 8`
+      ),
+      query(
+        `SELECT recipient, left(body, 90) AS body, status, created_at
+         FROM outbound_messages ORDER BY created_at DESC LIMIT 10`
+      ),
+    ]);
+    return {
+      ok: true,
+      conversation_turns: turns.rows,
+      captures: caps.rows,
+      scheduled_messages: sched.rows,
+      outbound_messages: out.rows,
+    };
+  });
+
   /** Ask Bolna what actually happened to a call (why it never dialled). */
   app.get("/admin/call-status", async (req, reply) => {
     const q = req.query as Record<string, string>;
