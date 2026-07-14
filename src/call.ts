@@ -1,29 +1,50 @@
 import { config } from "./config.js";
 import { logger } from "./logger.js";
+import { query } from "./db/pool.js";
+import type { AuthorKey } from "./users.js";
 
 /**
- * Place an actual phone call via Bolna (voice AI agent) — used only for reminders
- * the user marked urgent, asked to be *called* about, or alarm-style wake-ups.
- * Normal reminders stay as WhatsApp messages.
+ * Voice calls via Bolna.
  *
- * The reminder text is passed as `user_data`, so the Bolna agent's prompt should
- * reference {reminder} (and optionally {name}) to speak it aloud.
+ * ONE Bolna agent serves every purpose: we pass an `instruction` in `user_data`
+ * telling it what to do on this call, so the agent's prompt only needs to follow
+ * {instruction}. Purposes:
+ *   - reminder: speak the reminder, hang up (one-way).
+ *   - capture:  ask what's on their mind, LISTEN, let them talk (hands-free brain dump).
+ *   - outbound: call a third party and carry out a task on the user's behalf.
+ *
+ * Every call is recorded so the post-call webhook knows why it happened and can
+ * act on the transcript.
  */
+export type CallPurpose = "reminder" | "capture" | "outbound";
+
 export function callingEnabled(): boolean {
   return Boolean(config.BOLNA_API_KEY && config.BOLNA_AGENT_ID);
 }
 
+export interface PlaceCallInput {
+  toPhoneDigits: string;
+  purpose: CallPurpose;
+  instruction: string; // what the voice agent should actually do on the call
+  authorKey: AuthorKey;
+  context?: string; // the reminder text / the task, for the webhook to reference
+  name?: string;
+}
+
 export async function placeCall(
-  toPhoneDigits: string,
-  reminder: string,
-  name?: string
-): Promise<{ ok: boolean; error?: string }> {
+  input: PlaceCallInput
+): Promise<{ ok: boolean; executionId?: string; error?: string }> {
   if (!callingEnabled()) return { ok: false, error: "calling_not_configured" };
 
+  const to = `+${input.toPhoneDigits.replace(/[^0-9]/g, "")}`; // E.164
   const body: Record<string, unknown> = {
     agent_id: config.BOLNA_AGENT_ID,
-    recipient_phone_number: `+${toPhoneDigits.replace(/[^0-9]/g, "")}`, // E.164
-    user_data: { reminder, name: name ?? "" },
+    recipient_phone_number: to,
+    user_data: {
+      name: input.name ?? "",
+      instruction: input.instruction,
+      purpose: input.purpose,
+    },
   };
   if (config.BOLNA_FROM_NUMBER) body.from_phone_number = config.BOLNA_FROM_NUMBER;
 
@@ -38,9 +59,43 @@ export async function placeCall(
 
   if (!res.ok) {
     const text = await res.text();
-    logger.error("bolna call failed", { status: res.status, body: text, to: toPhoneDigits });
+    logger.error("bolna call failed", { status: res.status, body: text, to, purpose: input.purpose });
     return { ok: false, error: `${res.status} ${text}` };
   }
-  logger.info("bolna call placed", { to: toPhoneDigits });
-  return { ok: true };
+
+  // Bolna returns the execution id; we key the post-call webhook off it.
+  const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  const executionId =
+    (json.execution_id as string) ?? (json.id as string) ?? (json.call_id as string) ?? undefined;
+
+  if (executionId) {
+    await query(
+      `INSERT INTO calls (execution_id, author_key, purpose, context, recipient, status)
+       VALUES ($1,$2,$3,$4,$5,'queued')
+       ON CONFLICT (execution_id) DO NOTHING`,
+      [executionId, input.authorKey, input.purpose, input.context ?? null, to]
+    ).catch((err) => logger.warn("call record failed", { err: String(err) }));
+  } else {
+    logger.warn("bolna gave no execution id — webhook cannot be matched", { purpose: input.purpose });
+  }
+
+  logger.info("bolna call placed", { to, purpose: input.purpose, executionId });
+  return { ok: true, executionId };
 }
+
+/** Instruction text for each kind of call. Kept here so it's easy to tune. */
+export const INSTRUCTIONS = {
+  reminder: (text: string) =>
+    `Deliver this reminder clearly and warmly: "${text}". Then confirm they heard it and END the call. Do not chat. Keep it under 30 seconds.`,
+
+  capture: (name: string) =>
+    `You are calling ${name} so they can think out loud hands-free (they may be driving). ` +
+    `Greet them briefly, then ask: "What's on your mind?" Then LISTEN. Let them talk freely without interrupting. ` +
+    `If they pause, gently ask "anything else?". Do not give advice or opinions — you are only here to capture. ` +
+    `When they say they're done, confirm you've got it all, tell them you'll save it, and END the call.`,
+
+  outbound: (onBehalfOf: string, task: string) =>
+    `You are a polite assistant calling on behalf of ${onBehalfOf}. Your task: ${task}. ` +
+    `Introduce yourself as ${onBehalfOf}'s assistant. Be courteous and concise. Get a clear answer or confirmation, ` +
+    `repeat back the key details to be sure, then thank them and END the call. Do not make commitments beyond the task.`,
+} as const;

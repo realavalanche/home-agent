@@ -27,12 +27,13 @@ async function insertRow(
     scheduleKey?: string;
     autoComplete?: boolean;
     viaCall?: boolean;
+    escalate?: boolean;
   } = {}
 ): Promise<number> {
   const res = await query<{ id: number }>(
     `INSERT INTO scheduled_messages
-       (author_key, recipient, body, send_at, kind, status, notion_task_id, recurrence, schedule_key, auto_complete, via_call)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
+       (author_key, recipient, body, send_at, kind, status, notion_task_id, recurrence, schedule_key, auto_complete, via_call, escalate)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
     [
       authorKey,
       recipient,
@@ -45,6 +46,7 @@ async function insertRow(
       extra.scheduleKey ?? null,
       extra.autoComplete ?? false,
       extra.viaCall ?? false,
+      extra.escalate ?? false,
     ]
   );
   return res.rows[0]!.id;
@@ -74,7 +76,8 @@ export async function scheduleReminder(
   recipient: string,
   body: string,
   sendAtISO: string,
-  viaCall = false
+  viaCall = false,
+  escalate = false
 ): Promise<number> {
   let notionTaskId: string | undefined;
   try {
@@ -86,6 +89,7 @@ export async function scheduleReminder(
     notionTaskId,
     autoComplete: true, // a pure reminder's job is done once it fires
     viaCall,
+    escalate,
   });
   await armJob(id, sendAtISO);
   return id;

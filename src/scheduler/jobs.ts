@@ -6,13 +6,20 @@ import { query } from "../db/pool.js";
 import { processIngest } from "../ingest.js";
 import { sendText } from "../whatsapp/client.js";
 import { markTaskDone } from "../notion/log.js";
-import { placeCall, callingEnabled } from "../call.js";
+import { placeCall, callingEnabled, INSTRUCTIONS } from "../call.js";
+import type { AuthorKey } from "../users.js";
 import { runWeeklyReview } from "./weekly-review.js";
 import { runMorningBriefing } from "./morning-briefing.js";
 import { runNotionSync } from "./notion-sync.js";
 import { runMealCheckin } from "./meal-checkin.js";
 import { runKeepalive } from "./keepalive.js";
-import { allUsers } from "../users.js";
+import { allUsers, getUser } from "../users.js";
+
+/** How long an URGENT reminder may sit unread before we ring the phone. */
+const ESCALATE_AFTER_MINUTES = 30;
+
+/** Body used to mark a scheduled row as a hands-free capture call, not a reminder. */
+export const CAPTURE_CALL_MARKER = "__capture_call__";
 
 /**
  * Boot the background workers + cron schedules. Runs in the same process as the
@@ -61,6 +68,11 @@ export async function startScheduler(): Promise<void> {
   });
   await boss.schedule(QUEUES.KEEPALIVE, "0 * * * *", {}, { tz: config.TIMEZONE, key: "keepalive" });
 
+  // 8) Escalation: an URGENT reminder still unread after 30 min → ring the phone.
+  await boss.work<SendJob>(QUEUES.ESCALATE, async (jobs: Job<SendJob>[]) => {
+    for (const job of jobs) await escalateIfUnread(job.data.scheduledId);
+  });
+
   // Remove the short-lived household schedule; the review is per-person again.
   await boss.unschedule(QUEUES.WEEKLY, "weekly-household").catch(() => {});
 
@@ -92,14 +104,16 @@ export async function startScheduler(): Promise<void> {
  */
 async function dispatchScheduled(scheduledId: number): Promise<void> {
   const res = await query<{
+    author_key: string;
     recipient: string;
     body: string;
     status: string;
     notion_task_id: string | null;
     auto_complete: boolean;
     via_call: boolean;
+    escalate: boolean;
   }>(
-    `SELECT recipient, body, status, notion_task_id, auto_complete, via_call
+    `SELECT author_key, recipient, body, status, notion_task_id, auto_complete, via_call, escalate
      FROM scheduled_messages WHERE id = $1`,
     [scheduledId]
   );
@@ -136,17 +150,55 @@ async function dispatchScheduled(scheduledId: number): Promise<void> {
     return;
   }
 
+  // A scheduled hands-free CAPTURE call: ring them and let them think out loud.
+  // No WhatsApp text — the whole point is the call; the transcript comes back via
+  // the Bolna webhook and gets filed.
+  if (row.body === CAPTURE_CALL_MARKER) {
+    if (callingEnabled()) {
+      const user = getUser(row.author_key as AuthorKey);
+      await placeCall({
+        toPhoneDigits: row.recipient,
+        purpose: "capture",
+        instruction: INSTRUCTIONS.capture(user.name),
+        authorKey: user.key,
+        context: "hands-free capture call",
+        name: user.name,
+      }).catch((err) => logger.error("capture call failed", { scheduledId, err: String(err) }));
+    }
+    return;
+  }
+
   // Urgent / "call me" / alarm reminders ring the phone. We still send the
   // WhatsApp text so there's a written record (and a fallback if the call fails).
   if (row.via_call && callingEnabled()) {
     try {
-      const call = await placeCall(row.recipient, row.body);
+      const call = await placeCall({
+        toPhoneDigits: row.recipient,
+        purpose: "reminder",
+        instruction: INSTRUCTIONS.reminder(row.body),
+        authorKey: row.author_key as AuthorKey,
+        context: row.body,
+      });
       if (!call.ok) logger.warn("call failed, message still sent", { scheduledId, err: call.error });
     } catch (err) {
       logger.warn("call threw, message still sent", { scheduledId, err: String(err) });
     }
   }
-  await sendText(row.recipient, row.body);
+
+  const waId = await sendText(row.recipient, row.body);
+
+  // URGENT reminders escalate: if it's still unread in 30 minutes, we ring them.
+  if (row.escalate && waId && callingEnabled()) {
+    await query(`UPDATE scheduled_messages SET sent_wa_id = $2 WHERE id = $1`, [scheduledId, waId]);
+    const boss = await getBoss();
+    await boss.sendAfter(
+      QUEUES.ESCALATE,
+      { scheduledId } satisfies SendJob,
+      {},
+      new Date(Date.now() + ESCALATE_AFTER_MINUTES * 60 * 1000)
+    );
+    logger.info("escalation armed", { scheduledId, minutes: ESCALATE_AFTER_MINUTES });
+  }
 
   // A pure reminder is complete once delivered — close its task so it doesn't
   // linger as overdue. (Family/vaccination nudges have auto_complete = false.)
@@ -154,4 +206,46 @@ async function dispatchScheduled(scheduledId: number): Promise<void> {
     await markTaskDone(row.notion_task_id).catch(() => {});
   }
   logger.info("scheduled message sent", { scheduledId, to: row.recipient, recurring: row.status === "recurring" });
+}
+
+/**
+ * An urgent reminder was sent 30 minutes ago. If WhatsApp says the user still
+ * hasn't READ it, ring their phone — a call is much harder to miss.
+ * (If their read receipts are off we'll only ever see "delivered"; in that case
+ * we escalate anyway, since we can't prove they saw it.)
+ */
+async function escalateIfUnread(scheduledId: number): Promise<void> {
+  const res = await query<{
+    author_key: string;
+    recipient: string;
+    body: string;
+    sent_wa_id: string | null;
+    wa_status: string | null;
+  }>(
+    `SELECT s.author_key, s.recipient, s.body, s.sent_wa_id, o.status AS wa_status
+     FROM scheduled_messages s
+     LEFT JOIN outbound_messages o ON o.wa_message_id = s.sent_wa_id
+     WHERE s.id = $1`,
+    [scheduledId]
+  );
+  const row = res.rows[0];
+  if (!row) return;
+
+  if (row.wa_status === "read") {
+    logger.info("escalation skipped — reminder was read", { scheduledId });
+    return;
+  }
+
+  logger.info("escalating unread urgent reminder to a call", { scheduledId, waStatus: row.wa_status });
+  if (!callingEnabled()) {
+    logger.warn("escalation wanted but calling not configured", { scheduledId });
+    return;
+  }
+  await placeCall({
+    toPhoneDigits: row.recipient,
+    purpose: "reminder",
+    instruction: INSTRUCTIONS.reminder(row.body),
+    authorKey: row.author_key as AuthorKey,
+    context: row.body,
+  }).catch((err) => logger.error("escalation call failed", { scheduledId, err: String(err) }));
 }

@@ -75,6 +75,9 @@ export async function buildServer() {
   const { registerAdminRoutes } = await import("./admin/routes.js");
   await registerAdminRoutes(app);
 
+  const { registerCallRoutes } = await import("./call/routes.js");
+  await registerCallRoutes(app);
+
   return app;
 }
 

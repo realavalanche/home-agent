@@ -15,6 +15,7 @@ export const QUEUES = {
   NOTION_SYNC: "notion-sync", // reconcile the Postgres index with Notion edits/deletes
   MEAL_CHECKIN: "meal-checkin", // 3pm IST: settle tomorrow's meals if not already planned
   KEEPALIVE: "keepalive", // hourly: ping before WhatsApp's 24h window closes
+  ESCALATE: "escalate", // urgent reminder unread after 30min -> phone call
 } as const;
 
 /** Payload for an inbound message to process. Raw audio is never queued — only

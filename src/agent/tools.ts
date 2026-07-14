@@ -42,6 +42,7 @@ import { normalizePhone } from "../config.js";
 import { rememberFact, recallFacts } from "../facts.js";
 import { scheduleNudge } from "../scheduler/schedule.js";
 import { buildImmunizationSchedule } from "../family.js";
+import { placeCall, callingEnabled, INSTRUCTIONS } from "../call.js";
 import { proposeMealPlan, confirmMealPlan, getMealPlans, describePlan } from "../meals.js";
 import { notifyPartnerOfPlan } from "../scheduler/meal-checkin.js";
 import { query } from "../db/pool.js";
@@ -203,6 +204,37 @@ export const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "schedule_capture_call",
+    description:
+      "Schedule a hands-free CALL where the assistant rings the user and lets them think out loud (e.g. while driving). Whatever they say is transcribed, filed to Notion, and acted on. Use for 'call me at 6 so I can dump my thoughts'.",
+    input_schema: {
+      type: "object",
+      properties: {
+        when_iso: { type: "string", description: "ISO 8601 with +05:30 offset" },
+      },
+      required: ["when_iso"],
+    },
+  },
+  {
+    name: "call_person",
+    description:
+      "Call SOMEONE ELSE by phone and carry out a task on the user's behalf (book a table, ask the plumber when he can come, confirm an appointment). NOT sent until the user confirms. Needs a phone number and a clear task.",
+    input_schema: {
+      type: "object",
+      properties: {
+        phone: { type: "string", description: "Phone digits with country code" },
+        who: { type: "string", description: "Who is being called, e.g. 'the electrician'" },
+        task: { type: "string", description: "Exactly what the assistant should achieve on the call" },
+      },
+      required: ["phone", "task"],
+    },
+  },
+  {
+    name: "confirm_call_person",
+    description: "The user confirms the pending call to a third party — place it now.",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
     name: "check_message_status",
     description:
       "Check whether a message the assistant sent was delivered or read (e.g. 'did Arpita read my message?'). Match by recipient number and/or words from the message.",
@@ -238,6 +270,11 @@ export const TOOLS: Anthropic.Tool[] = [
         call: {
           type: "boolean",
           description: "Ring their phone (alarm/urgent/explicit 'call me'). Default false.",
+        },
+        urgent: {
+          type: "boolean",
+          description:
+            "Mark URGENT: send as a message, but if they haven't READ it within 30 minutes, ring their phone. Use when they say it's important / must not be missed.",
         },
       },
       required: ["message", "when_iso"],
@@ -433,6 +470,12 @@ export async function runTool(name: string, input: Json, ctx: AgentContext): Pro
         return await handleConfirmMealPlan(input, ctx);
       case "get_meal_plan":
         return await handleGetMealPlan(input);
+      case "schedule_capture_call":
+        return await handleCaptureCall(input, ctx);
+      case "call_person":
+        return await handleCallPerson(input, ctx);
+      case "confirm_call_person":
+        return await handleConfirmCallPerson(ctx);
       case "check_message_status":
         return await handleMessageStatus(input);
       case "list_calendar_events":
@@ -665,6 +708,56 @@ async function handleGetMealPlan(input: Json): Promise<string> {
     .join("\n");
 }
 
+// A pending third-party call awaiting the user's confirmation (in-memory per user).
+const pendingCalls = new Map<string, { phone: string; who: string; task: string }>();
+
+async function handleCaptureCall(input: Json, ctx: AgentContext): Promise<string> {
+  const when = str(input, "when_iso");
+  if (!when) return "When should I call you?";
+  if (!callingEnabled()) return "Calling isn't set up yet, so I can't do a capture call.";
+  const whenDt = DateTime.fromISO(when, { zone: config.TIMEZONE });
+  if (!whenDt.isValid || whenDt <= DateTime.now().setZone(config.TIMEZONE)) {
+    return "That time is in the past — I did NOT schedule the call.";
+  }
+  // Reuse the reminder scheduler, but flag it as a CALL whose purpose is capture.
+  await scheduleReminder(
+    ctx.user.key,
+    ctx.user.name,
+    ctx.user.whatsapp,
+    `__capture_call__`, // marker body; dispatch turns this into a capture call
+    when,
+    true
+  );
+  return `Done — I'll call you at ${when} so you can think out loud. Whatever you say, I'll capture and file.`;
+}
+
+async function handleCallPerson(input: Json, ctx: AgentContext): Promise<string> {
+  if (!callingEnabled()) return "Calling isn't set up yet, so I can't make calls.";
+  const phone = normalizePhone(str(input, "phone") ?? "");
+  const task = str(input, "task") ?? "";
+  const who = str(input, "who") ?? phone;
+  if (!phone || !task) return "I need a phone number and what you want me to achieve on the call.";
+  pendingCalls.set(ctx.user.key, { phone, who, task });
+  return `Ready to call ${who} (${phone}) and: "${task}". NOT placed yet — ask the user to confirm first.`;
+}
+
+async function handleConfirmCallPerson(ctx: AgentContext): Promise<string> {
+  const pending = pendingCalls.get(ctx.user.key);
+  if (!pending) return "There's no call waiting to be confirmed.";
+  pendingCalls.delete(ctx.user.key);
+  const res = await placeCall({
+    toPhoneDigits: pending.phone,
+    purpose: "outbound",
+    instruction: INSTRUCTIONS.outbound(ctx.user.name, pending.task),
+    authorKey: ctx.user.key,
+    context: pending.task,
+    name: ctx.user.name,
+  });
+  return res.ok
+    ? `📞 Calling ${pending.who} now. I'll message you the outcome when the call ends.`
+    : `❌ Couldn't place the call: ${res.error}`;
+}
+
 async function handleMessageStatus(input: Json): Promise<string> {
   const recipient = normalizePhone(str(input, "recipient") ?? "");
   const matchText = str(input, "match_text") ?? "";
@@ -730,10 +823,11 @@ async function handleReminder(input: Json, ctx: AgentContext): Promise<string> {
   }
 
   const viaCall = input.call === true;
-  await scheduleReminder(ctx.user.key, ctx.user.name, ctx.user.whatsapp, message, when, viaCall);
-  return viaCall
-    ? `Set for ${when} — I'll CALL your phone (and message you too).`
-    : `Reminder set for ${when} and added to your Tasks in Notion. You can postpone it anytime by replying.`;
+  const urgent = input.urgent === true;
+  await scheduleReminder(ctx.user.key, ctx.user.name, ctx.user.whatsapp, message, when, viaCall, urgent);
+  if (viaCall) return `Set for ${when} — I'll CALL your phone (and message you too).`;
+  if (urgent) return `Set for ${when} — marked urgent, so if you haven't read it within 30 minutes I'll ring you.`;
+  return `Reminder set for ${when} and added to your Tasks in Notion. You can postpone it anytime by replying.`;
 }
 
 /** Build a 5-field cron (min hour * * dow) in app timezone from simple inputs. */

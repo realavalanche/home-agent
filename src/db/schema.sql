@@ -27,6 +27,25 @@ CREATE INDEX IF NOT EXISTS captures_embedding_idx
 CREATE INDEX IF NOT EXISTS captures_author_created_idx
   ON captures (author_key, created_at DESC);
 
+-- Every voice call we place via Bolna, so the post-call webhook knows WHY the call
+-- was made and can act on what was said (a brain-dump gets filed to Notion; a
+-- third-party call gets summarized back to the user).
+CREATE TABLE IF NOT EXISTS calls (
+  execution_id TEXT PRIMARY KEY,     -- Bolna's execution id
+  author_key   TEXT NOT NULL,        -- who the call is for / on behalf of
+  purpose      TEXT NOT NULL,        -- reminder | capture | outbound
+  context      TEXT,                 -- the reminder text, or the task to perform
+  recipient    TEXT,                 -- number dialled
+  status       TEXT,                 -- from Bolna: queued | in-progress | completed | failed
+  transcript   TEXT,
+  processed    BOOLEAN NOT NULL DEFAULT false, -- have we acted on the transcript?
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Urgent reminders can escalate to a phone call if left unread.
+ALTER TABLE scheduled_messages ADD COLUMN IF NOT EXISTS escalate   BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE scheduled_messages ADD COLUMN IF NOT EXISTS sent_wa_id TEXT;
+
 -- Tracks the "still there?" ping we send before WhatsApp's 24h window closes, so
 -- we ping at most once per period of silence (never spam).
 CREATE TABLE IF NOT EXISTS keepalive_pings (
