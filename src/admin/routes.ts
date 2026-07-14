@@ -26,6 +26,28 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     return { ok: true, count: res.rowCount, calls: res.rows };
   });
 
+  /** Ask Bolna what actually happened to a call (why it never dialled). */
+  app.get("/admin/call-status", async (req, reply) => {
+    const q = req.query as Record<string, string>;
+    if (q.token !== config.WHATSAPP_VERIFY_TOKEN) {
+      return reply.code(401).send({ ok: false, error: "unauthorized" });
+    }
+    if (!config.BOLNA_API_KEY) return { ok: false, error: "BOLNA_API_KEY not set" };
+    const id = q.id;
+    if (!id) return reply.code(400).send({ ok: false, error: "pass ?id=<execution_id>" });
+    const res = await fetch(`https://api.bolna.ai/executions/${id}`, {
+      headers: { Authorization: `Bearer ${config.BOLNA_API_KEY}` },
+    });
+    const text = await res.text();
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = text;
+    }
+    return { ok: res.ok, httpStatus: res.status, bolna: parsed };
+  });
+
   app.post("/admin/run", async (req, reply) => {
     const q = req.query as Record<string, string>;
     if (q.token !== config.WHATSAPP_VERIFY_TOKEN) {
