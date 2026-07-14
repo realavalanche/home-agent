@@ -226,8 +226,13 @@ export const TOOLS: Anthropic.Tool[] = [
         phone: { type: "string", description: "Phone digits with country code" },
         who: { type: "string", description: "Who is being called, e.g. 'the electrician'" },
         task: { type: "string", description: "Exactly what the assistant should achieve on the call" },
+        opening_line: {
+          type: "string",
+          description:
+            "A natural first sentence to say after introducing itself, e.g. 'He'd like to know when you could come by this week.' The call opens with this — do NOT leave it silent.",
+        },
       },
-      required: ["phone", "task"],
+      required: ["phone", "task", "opening_line"],
     },
   },
   {
@@ -710,7 +715,7 @@ async function handleGetMealPlan(input: Json): Promise<string> {
 }
 
 // A pending third-party call awaiting the user's confirmation (in-memory per user).
-const pendingCalls = new Map<string, { phone: string; who: string; task: string }>();
+const pendingCalls = new Map<string, { phone: string; who: string; task: string; opening: string }>();
 
 async function handleCaptureCall(input: Json, ctx: AgentContext): Promise<string> {
   const when = str(input, "when_iso");
@@ -738,7 +743,8 @@ async function handleCallPerson(input: Json, ctx: AgentContext): Promise<string>
   const task = str(input, "task") ?? "";
   const who = str(input, "who") ?? phone;
   if (!phone || !task) return "I need a phone number and what you want me to achieve on the call.";
-  pendingCalls.set(ctx.user.key, { phone, who, task });
+  const opening = str(input, "opening_line") ?? task;
+  pendingCalls.set(ctx.user.key, { phone, who, task, opening });
   return `Ready to call ${who} (${phone}) and: "${task}". NOT placed yet — ask the user to confirm first.`;
 }
 
@@ -755,7 +761,7 @@ async function handleConfirmCallPerson(ctx: AgentContext): Promise<string> {
         toPhoneDigits: pending.phone,
         purpose: "partner",
         instruction: INSTRUCTIONS.partner(household.name, ctx.user.name, pending.task),
-        greeting: GREETINGS.partner(household.name, ctx.user.name),
+        greeting: GREETINGS.partner(household.name, ctx.user.name, pending.task),
         authorKey: ctx.user.key,
         context: pending.task,
         name: household.name,
@@ -764,7 +770,7 @@ async function handleConfirmCallPerson(ctx: AgentContext): Promise<string> {
     toPhoneDigits: pending.phone,
     purpose: "outbound",
     instruction: INSTRUCTIONS.outbound(ctx.user.name, pending.task),
-    greeting: GREETINGS.outbound(ctx.user.name),
+    greeting: GREETINGS.outbound(ctx.user.name, pending.opening),
     authorKey: ctx.user.key,
     context: pending.task,
     name: ctx.user.name,

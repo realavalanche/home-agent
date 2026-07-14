@@ -91,34 +91,49 @@ export async function placeCall(
  * member — so we can't just say "Hi <user>".
  */
 export const GREETINGS = {
-  reminder: (name: string) => `Hi ${name}, it's your assistant with a quick reminder.`,
+  // Bolna speaks the greeting, then WAITS for the person to talk before the LLM
+  // says anything. So an announcement call must deliver its whole message in the
+  // greeting — otherwise the line just goes silent until it times out.
+  reminder: (name: string, text: string) =>
+    `Hi ${name}, it's your assistant with a reminder. ${text}`,
+
+  partner: (toName: string, fromName: string, message: string) =>
+    `Hi ${toName}! It's the home assistant. ${fromName} asked me to tell you: ${message}`,
+
+  // Capture genuinely wants them to talk next, so a question is right here.
   capture: (name: string) =>
     `Hi ${name}, it's your assistant. Whenever you're ready — what's on your mind?`,
-  outbound: (onBehalfOf: string) => `Hello! I'm calling on behalf of ${onBehalfOf}.`,
-  // Calling the other partner is a household call, not a cold business call.
-  partner: (toName: string, fromName: string) =>
-    `Hi ${toName}! It's the home assistant — ${fromName} asked me to pass on a message.`,
+
+  // The agent writes a natural opening line for third-party calls.
+  outbound: (onBehalfOf: string, openingLine: string) =>
+    `Hello! I'm calling on behalf of ${onBehalfOf}. ${openingLine}`,
 } as const;
 
-/** Instruction text for each kind of call. Kept here so it's easy to tune. */
+/**
+ * What the agent does AFTER the greeting (which already delivered the message).
+ * Keep these about handling the reply, not about re-stating the message.
+ */
 export const INSTRUCTIONS = {
   reminder: (text: string) =>
-    `Deliver this reminder clearly and warmly: "${text}". Then confirm they heard it and END the call. Do not chat. Keep it under 30 seconds.`,
+    `You have just delivered this reminder in your greeting: "${text}". ` +
+    `If they acknowledge, confirm warmly and END the call. If they ask you to repeat it, repeat it once. ` +
+    `Do not chat. Keep the whole call under 30 seconds.`,
+
+  partner: (toName: string, fromName: string, message: string) =>
+    `You have just told ${toName} this message from ${fromName}: "${message}". ` +
+    `This is family, not a business call — be warm and natural. If she replies in Hindi or Hinglish, ` +
+    `reply in the same language. Confirm she's understood, briefly answer any question about the message, ` +
+    `then thank her and END the call. Keep it under a minute.`,
 
   capture: (name: string) =>
     `You are calling ${name} so they can think out loud hands-free (they may be driving). ` +
-    `Greet them briefly, then ask: "What's on your mind?" Then LISTEN. Let them talk freely without interrupting. ` +
-    `If they pause, gently ask "anything else?". Do not give advice or opinions — you are only here to capture. ` +
-    `When they say they're done, confirm you've got it all, tell them you'll save it, and END the call.`,
-
-  partner: (toName: string, fromName: string, message: string) =>
-    `You are the household assistant calling ${toName} with a message from ${fromName}. ` +
-    `Warmly and clearly tell her: "${message}". Speak naturally — this is family, not a business call. ` +
-    `If she replies in Hindi or Hinglish, respond in the same language. Make sure she has understood, ` +
-    `briefly answer any question about the message, then thank her and END the call. Keep it under a minute.`,
+    `You have already asked what's on their mind. Now LISTEN. Let them talk freely without interrupting. ` +
+    `If they pause, gently ask "anything else?". Do not give advice — you are only here to capture. ` +
+    `When they say they're done, confirm you've got it, tell them you'll save it, and END the call.`,
 
   outbound: (onBehalfOf: string, task: string) =>
     `You are a polite assistant calling on behalf of ${onBehalfOf}. Your task: ${task}. ` +
-    `Introduce yourself as ${onBehalfOf}'s assistant. Be courteous and concise. Get a clear answer or confirmation, ` +
-    `repeat back the key details to be sure, then thank them and END the call. Do not make commitments beyond the task.`,
+    `You have already introduced yourself and opened the conversation. Be courteous and concise. ` +
+    `Get a clear answer or confirmation, repeat back the key details to be sure, then thank them and END ` +
+    `the call. Do not make commitments beyond the task.`,
 } as const;
