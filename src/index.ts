@@ -52,7 +52,10 @@ export async function buildServer() {
     } catch {
       db = "down";
     }
-    return { ok: true, db, tz: config.TIMEZONE };
+    // ffmpeg is required to split voice notes over Sarvam's 30s limit.
+    const { spawnSync } = await import("node:child_process");
+    const ffmpeg = spawnSync("ffmpeg", ["-version"]).status === 0 ? "up" : "missing";
+    return { ok: true, db, ffmpeg, tz: config.TIMEZONE };
   });
 
   // Privacy policy — Meta requires a valid Privacy Policy URL to take the app

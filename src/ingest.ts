@@ -37,25 +37,42 @@ export async function processIngest(job: IngestJob): Promise<void> {
   let source: "voice" | "text" | "image";
   if (job.type === "audio" && job.mediaId) {
     source = "voice";
-    const media = await downloadMedia(job.mediaId);
-    const t = await transcribe(media);
-    transcript = t.text;
-    language = t.languageCode;
+    // MUST be guarded: if download/transcription throws and we don't catch it, the
+    // job dies and the user gets total silence — no ack, no error, nothing.
+    try {
+      const media = await downloadMedia(job.mediaId);
+      const t = await transcribe(media);
+      transcript = t.text;
+      language = t.languageCode;
+    } catch (err) {
+      logger.error("voice transcription failed", { err: String(err), waMessageId: job.waMessageId });
+      await sendText(
+        user.whatsapp,
+        "Sorry — I couldn't process that voice note. 🙏 Could you try sending it again? (If it's a long one, breaking it into a couple of shorter notes helps.)"
+      );
+      return;
+    }
     if (!transcript) {
       await sendText(user.whatsapp, "Sorry, I couldn't make out that voice note — could you resend it?");
       return;
     }
   } else if ((job.type === "image" || job.type === "document") && job.mediaId) {
     source = "image";
-    const media = await downloadMedia(job.mediaId);
-    const described = await describeMedia(media, job.caption);
-    if (!described) {
-      await sendText(user.whatsapp, "I can read images and PDFs, but not that file type yet.");
+    try {
+      const media = await downloadMedia(job.mediaId);
+      const described = await describeMedia(media, job.caption);
+      if (!described) {
+        await sendText(user.whatsapp, "I can read images and PDFs, but not that file type yet.");
+        return;
+      }
+      // Include the caption so the agent has the user's intent alongside the extraction.
+      transcript = job.caption ? `${job.caption}\n\n[Attachment] ${described}` : `[Attachment] ${described}`;
+      language = looksHindi(job.caption ?? "") ? "hi-IN" : "en-IN";
+    } catch (err) {
+      logger.error("attachment processing failed", { err: String(err), waMessageId: job.waMessageId });
+      await sendText(user.whatsapp, "Sorry — I couldn't read that attachment. 🙏 Mind sending it again?");
       return;
     }
-    // Include the caption so the agent has the user's intent alongside the extraction.
-    transcript = job.caption ? `${job.caption}\n\n[Attachment] ${described}` : `[Attachment] ${described}`;
-    language = looksHindi(job.caption ?? "") ? "hi-IN" : "en-IN";
   } else {
     source = "text";
     transcript = job.text ?? "";

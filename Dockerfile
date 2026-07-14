@@ -1,5 +1,10 @@
 FROM node:24-slim
 
+# ffmpeg is used to split voice notes longer than Sarvam's 30-second REST limit
+# into transcribable segments.
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+  && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 # Install deps first for layer caching.
