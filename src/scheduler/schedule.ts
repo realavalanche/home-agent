@@ -272,28 +272,50 @@ export async function scheduleOutboundPending(
   return insertRow(authorKey, recipient, body, sendAtISO, "outbound", "awaiting_confirm");
 }
 
-/** The user's most recent unconfirmed outbound message, if any. */
+// A "please confirm?" offer is only live for a short window. After that it's dead:
+// confirming it hours or days later would fire a stale, out-of-context message
+// (exactly how a week-old message resurfaced).
+const CONFIRMATION_WINDOW_MINUTES = 30;
+
+/** Expire un-actioned confirmation offers so they can never be triggered later. */
+export async function expireStaleConfirmations(): Promise<number> {
+  const res = await query(
+    `UPDATE scheduled_messages SET status = 'expired'
+     WHERE status = 'awaiting_confirm'
+       AND created_at < now() - ($1 || ' minutes')::interval`,
+    [String(CONFIRMATION_WINDOW_MINUTES)]
+  );
+  return res.rowCount ?? 0;
+}
+
+/** The user's most recent unconfirmed outbound message — only if still fresh. */
 export async function latestPendingConfirmation(
   authorKey: AuthorKey
 ): Promise<{ id: number; recipient: string; body: string; send_at: string } | undefined> {
   const res = await query<{ id: number; recipient: string; body: string; send_at: string }>(
     `SELECT id, recipient, body, send_at FROM scheduled_messages
      WHERE author_key = $1 AND status = 'awaiting_confirm'
+       AND created_at > now() - ($2 || ' minutes')::interval
      ORDER BY created_at DESC LIMIT 1`,
-    [authorKey]
+    [authorKey, String(CONFIRMATION_WINDOW_MINUTES)]
   );
   return res.rows[0];
 }
 
-/** Confirm + arm a parked outbound message. */
+/** Confirm + arm a parked outbound message — only a RECENT one. */
 export async function confirmScheduled(id: number): Promise<boolean> {
   const res = await query<{ send_at: string }>(
-    `SELECT send_at FROM scheduled_messages WHERE id = $1 AND status = 'awaiting_confirm'`,
-    [id]
+    `SELECT send_at FROM scheduled_messages
+     WHERE id = $1 AND status = 'awaiting_confirm'
+       AND created_at > now() - ($2 || ' minutes')::interval`,
+    [id, String(CONFIRMATION_WINDOW_MINUTES)]
   );
   const row = res.rows[0];
   if (!row) return false;
-  await armJob(id, new Date(row.send_at).toISOString());
+  // Never arm in the past (pg-boss would fire it instantly): if the intended
+  // time has already passed, send now instead.
+  const when = new Date(row.send_at).getTime() < Date.now() ? new Date() : new Date(row.send_at);
+  await armJob(id, when.toISOString());
   return true;
 }
 

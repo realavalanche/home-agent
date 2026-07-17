@@ -3,6 +3,7 @@ import { logger } from "../logger.js";
 import { query } from "../db/pool.js";
 import { allUsers, type User } from "../users.js";
 import { sendTemplate } from "../whatsapp/client.js";
+import { expireStaleConfirmations } from "./schedule.js";
 
 /**
  * Keep WhatsApp's 24-hour window open.
@@ -78,6 +79,11 @@ export async function pingOnce(user: User): Promise<boolean> {
  * giving them time to reply BEFORE it does.
  */
 export async function runKeepalive(): Promise<void> {
+  // Also expire stale "please confirm?" offers so an old one can never be
+  // triggered later and send an out-of-context message.
+  const expired = await expireStaleConfirmations().catch(() => 0);
+  if (expired) logger.info("expired stale confirmations", { count: expired });
+
   for (const user of allUsers()) {
     const hours = await hoursSinceLastMessage(user.key);
     if (hours === undefined) continue; // never messaged us — nothing to keep alive
