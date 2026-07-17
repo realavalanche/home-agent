@@ -156,6 +156,16 @@ export async function registerAdminRoutes(app: FastifyInstance) {
           await runNotionSync();
           return { ok: true, ran: "notion-sync" };
         }
+        case "keepalive": {
+          const { runKeepalive } = await import("../scheduler/keepalive.js");
+          await runKeepalive();
+          return { ok: true, ran: "keepalive" };
+        }
+        case "expire-confirmations": {
+          const { expireStaleConfirmations } = await import("../scheduler/schedule.js");
+          const n = await expireStaleConfirmations();
+          return { ok: true, ran: "expire-confirmations", expired: n };
+        }
         default:
           return reply
             .code(400)
