@@ -33,6 +33,9 @@ const schema = z.object({
   // Ping this many hours after the user's last message, i.e. BEFORE WhatsApp's
   // 24h window closes — so they have time to reply and keep it open.
   WINDOW_KEEPALIVE_HOURS: z.coerce.number().default(23),
+  // Comma-separated author keys that receive the 6:30am morning briefing.
+  // Arpita (B) opted out; Sid (A) keeps it.
+  MORNING_BRIEFING_USERS: z.string().default("A"),
 
   USER_A_NAME: z.string().default("User A"),
   USER_A_WHATSAPP: z.string().min(6),
