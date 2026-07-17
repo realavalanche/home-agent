@@ -26,6 +26,42 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     return { ok: true, count: res.rowCount, calls: res.rows };
   });
 
+  /** Search every trace of a message across the pipeline (diagnose re-sends). */
+  app.get("/admin/search", async (req, reply) => {
+    const q = req.query as Record<string, string>;
+    if (q.token !== config.WHATSAPP_VERIFY_TOKEN) {
+      return reply.code(401).send({ ok: false, error: "unauthorized" });
+    }
+    const term = q.q ?? "";
+    if (!term) return reply.code(400).send({ ok: false, error: "pass ?q=<text>" });
+    const { query } = await import("../db/pool.js");
+    const like = `%${term}%`;
+    const [sent, scheduled, turns] = await Promise.all([
+      query(
+        `SELECT wa_message_id, recipient, body, status, status_at, created_at
+         FROM outbound_messages WHERE body ILIKE $1 ORDER BY created_at`,
+        [like]
+      ),
+      query(
+        `SELECT id, author_key, kind, status, recurrence, schedule_key, recipient,
+                body, send_at, last_fired_at, created_at
+         FROM scheduled_messages WHERE body ILIKE $1 ORDER BY created_at`,
+        [like]
+      ),
+      query(
+        `SELECT author_key, role, left(content, 200) AS content, created_at
+         FROM conversation_turns WHERE content ILIKE $1 ORDER BY created_at`,
+        [like]
+      ),
+    ]);
+    return {
+      ok: true,
+      outbound_sends: sent.rows, // every time we actually sent it
+      scheduled_rows: scheduled.rows, // the reminder/outbound row(s) behind it
+      conversation_mentions: turns.rows,
+    };
+  });
+
   /** Recent activity across the pipeline — for diagnosing "nothing happened". */
   app.get("/admin/recent", async (req, reply) => {
     const q = req.query as Record<string, string>;
