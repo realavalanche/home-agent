@@ -1,4 +1,4 @@
-import { notion, text } from "./client.js";
+import { notion, text, notionCreatePage, notionUpdatePage, notionQueryDataSource } from "./client.js";
 import { config } from "../config.js";
 import type { Category, MealSubcategory } from "../categorize.js";
 import type { AuthorKey } from "../users.js";
@@ -36,7 +36,7 @@ export async function createCapturePage(input: CaptureInput): Promise<string> {
     properties.Related = { relation: input.relatedPageIds.map((id) => ({ id })) };
   }
 
-  const page = await notion.pages.create({
+  const page = await notionCreatePage({
     parent: { type: "data_source_id", data_source_id: dsId },
     properties: properties as never,
   });
@@ -45,7 +45,7 @@ export async function createCapturePage(input: CaptureInput): Promise<string> {
 
 /** Send a capture page to Notion's trash (used for delete/undo). */
 export async function archiveCapturePage(pageId: string): Promise<void> {
-  await notion.pages.update({ page_id: pageId, in_trash: true } as never);
+  await notionUpdatePage({ page_id: pageId, in_trash: true } as never);
 }
 
 /** Update a capture page's transcript and/or category (used for edit). */
@@ -58,13 +58,13 @@ export async function updateCapturePage(
   if (changes.category) properties.Category = { select: { name: changes.category } };
   if (changes.title) properties.Title = { title: text(changes.title) };
   if (Object.keys(properties).length === 0) return;
-  await notion.pages.update({ page_id: pageId, properties: properties as never });
+  await notionUpdatePage({ page_id: pageId, properties: properties as never });
 }
 
 /** Attach related-note relations to an existing capture (auto-link on ingest). */
 export async function linkRelated(pageId: string, relatedPageIds: string[]): Promise<void> {
   if (!relatedPageIds.length) return;
-  await notion.pages.update({
+  await notionUpdatePage({
     page_id: pageId,
     properties: {
       Related: { relation: relatedPageIds.map((id) => ({ id })) },
@@ -91,7 +91,7 @@ export async function createTaskPage(input: TaskInput): Promise<string> {
   if (input.sourceIdeaPageId) {
     properties["Source Idea"] = { relation: [{ id: input.sourceIdeaPageId }] };
   }
-  const page = await notion.pages.create({
+  const page = await notionCreatePage({
     parent: { type: "data_source_id", data_source_id: dsId },
     properties: properties as never,
   });
@@ -100,7 +100,7 @@ export async function createTaskPage(input: TaskInput): Promise<string> {
 
 /** Move a task's Due date (used when a reminder is snoozed/postponed). */
 export async function updateTaskDue(pageId: string, dueISO: string): Promise<void> {
-  await notion.pages.update({
+  await notionUpdatePage({
     page_id: pageId,
     properties: { Due: { date: { start: dueISO } } } as never,
   });
@@ -108,7 +108,7 @@ export async function updateTaskDue(pageId: string, dueISO: string): Promise<voi
 
 /** Mark a task done (used when a recurring reminder is stopped). */
 export async function markTaskDone(pageId: string): Promise<void> {
-  await notion.pages.update({
+  await notionUpdatePage({
     page_id: pageId,
     properties: { Status: { select: { name: "Done" } } } as never,
   });
@@ -119,7 +119,7 @@ export async function findOpenTaskByText(
   text: string
 ): Promise<{ id: string; title: string } | undefined> {
   const dsId = requireDs(config.NOTION_DS_TASKS, "NOTION_DS_TASKS");
-  const res = await notion.dataSources.query({
+  const res = await notionQueryDataSource({
     data_source_id: dsId,
     filter: {
       and: [
@@ -142,7 +142,7 @@ export async function listOverdueTasks(
   todayISODate: string
 ): Promise<{ title: string; due: string }[]> {
   if (!config.NOTION_DS_TASKS) return [];
-  const res = await notion.dataSources.query({
+  const res = await notionQueryDataSource({
     data_source_id: config.NOTION_DS_TASKS,
     filter: {
       and: [
@@ -172,7 +172,7 @@ export interface WeeklyReviewInput {
 /** Post a weekly review as a Notion page with the summary in the body. */
 export async function createWeeklyReviewPage(input: WeeklyReviewInput): Promise<string> {
   const dsId = requireDs(config.NOTION_DS_WEEKLY, "NOTION_DS_WEEKLY");
-  const page = await notion.pages.create({
+  const page = await notionCreatePage({
     parent: { type: "data_source_id", data_source_id: dsId },
     properties: {
       Title: { title: text(input.title) },

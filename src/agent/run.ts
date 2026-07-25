@@ -55,13 +55,7 @@ async function runLoop(
   const toolsUsed: string[] = [];
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
-    const res = await anthropic.messages.create({
-      model: config.CLAUDE_AGENT_MODEL,
-      max_tokens: 1024,
-      system,
-      tools: TOOLS,
-      messages,
-    });
+    const res = await createMessage(system, messages);
 
     messages.push({ role: "assistant", content: res.content });
 
@@ -120,6 +114,33 @@ function noReply(ctx: AgentContext, toolsUsed: string[]): string {
   return hi
     ? "Maine kuch steps liye lekin theek se poora nahi kar paya. 🙏 Kya aap phir se bata sakte hain?"
     : "I started on that but couldn't finish it properly — so please don't assume it went through. 🙏 Mind trying again?";
+}
+
+/**
+ * Call the model, retrying if it returns a completely empty response (no text and
+ * no tool call). Empty responses are what produced the bogus "I didn't catch that"
+ * replies on trivial messages; a quick retry almost always recovers.
+ */
+async function createMessage(
+  system: string,
+  messages: Anthropic.MessageParam[]
+): Promise<Anthropic.Message> {
+  let res: Anthropic.Message | undefined;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    res = await anthropic.messages.create({
+      model: config.CLAUDE_AGENT_MODEL,
+      max_tokens: 1024,
+      system,
+      tools: TOOLS,
+      messages,
+    });
+    const hasText = res.content.some((b) => b.type === "text" && b.text.trim().length > 0);
+    const hasTool = res.content.some((b) => b.type === "tool_use");
+    if (hasText || hasTool) return res;
+    logger.warn("empty model response, retrying", { attempt });
+    await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+  }
+  return res!;
 }
 
 function extractText(content: Anthropic.ContentBlock[]): string {

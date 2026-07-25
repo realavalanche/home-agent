@@ -1,7 +1,7 @@
 import { config } from "../config.js";
 import { logger } from "../logger.js";
 import { query } from "../db/pool.js";
-import { notion } from "../notion/client.js";
+import { notionQueryDataSource } from "../notion/client.js";
 import { updateCaptureText, deleteCaptureRow } from "../search/store.js";
 
 /**
@@ -18,7 +18,7 @@ export async function runNotionSync(): Promise<void> {
   const notionPages = new Map<string, { transcript: string; category: string }>();
   let cursor: string | undefined;
   do {
-    const res = (await notion.dataSources.query({
+    const res = (await notionQueryDataSource({
       data_source_id: dsId,
       page_size: 100,
       start_cursor: cursor,

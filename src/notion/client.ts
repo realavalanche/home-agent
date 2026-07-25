@@ -1,5 +1,6 @@
 import { Client } from "@notionhq/client";
 import { config } from "../config.js";
+import { logger } from "../logger.js";
 
 /**
  * Shared Notion client. We pin the 2025-09-03 API version: in it a "database" is
@@ -11,6 +12,40 @@ export const notion = new Client({
   auth: config.NOTION_TOKEN,
   notionVersion: "2025-09-03",
 });
+
+/**
+ * Notion allows only ~3 requests/second. Creating several tasks at once (e.g.
+ * splitting a list into 6) blew past that and failed. This retries on HTTP 429
+ * (rate_limited) with backoff, honoring Notion's Retry-After header, so bulk
+ * writes succeed instead of erroring.
+ */
+export async function withNotionRetry<T>(fn: () => Promise<T>, label = "notion"): Promise<T> {
+  const MAX_ATTEMPTS = 6;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const e = err as { code?: string; status?: number; headers?: Record<string, string> };
+      const rateLimited = e?.code === "rate_limited" || e?.status === 429;
+      if (!rateLimited || attempt >= MAX_ATTEMPTS - 1) throw err;
+      const retryAfter = Number(e?.headers?.["retry-after"]);
+      const waitMs = retryAfter > 0 ? retryAfter * 1000 : Math.min(500 * 2 ** attempt, 8000);
+      logger.warn("notion rate-limited, backing off", { label, attempt, waitMs });
+      await new Promise((r) => setTimeout(r, waitMs));
+    }
+  }
+}
+
+// Rate-limit-safe wrappers around the mutating/query calls used across the app.
+export function notionCreatePage(args: Parameters<typeof notion.pages.create>[0]) {
+  return withNotionRetry(() => notion.pages.create(args), "pages.create");
+}
+export function notionUpdatePage(args: Parameters<typeof notion.pages.update>[0]) {
+  return withNotionRetry(() => notion.pages.update(args), "pages.update");
+}
+export function notionQueryDataSource(args: Parameters<typeof notion.dataSources.query>[0]) {
+  return withNotionRetry(() => notion.dataSources.query(args), "dataSources.query");
+}
 
 /** Notion rich_text/title helper. */
 export function text(content: string) {

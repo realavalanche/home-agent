@@ -10,11 +10,14 @@ import type { AuthorKey } from "./users.js";
  * Bounded by a turn count + time window so token cost stays small and stale,
  * unrelated context doesn't leak into a fresh conversation.
  */
-// Kept tight: enough to follow an active back-and-forth (give a name, then a
-// number, then the text), but short enough that older, already-handled items
-// don't linger in context and get re-surfaced in unrelated replies.
-const MAX_TURNS = 8;
-const WINDOW_MINUTES = 30;
+// Real conversational memory: the agent should recall what you discussed
+// yesterday, not just in the last half hour. Re-surfacing of *already-handled*
+// items is now prevented at the data layer (confirmations expire, past-dated /
+// duplicate reminders are rejected, and the prompt forbids re-doing past actions),
+// so this can be generous. Bounded by turn count to keep token cost sane.
+const MAX_TURNS = 30;
+const WINDOW_MINUTES = 60 * 48; // 48 hours
+
 
 export interface Turn {
   role: "user" | "assistant";
