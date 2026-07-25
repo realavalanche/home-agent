@@ -14,14 +14,36 @@ export const notion = new Client({
 });
 
 /**
- * Notion allows only ~3 requests/second. Creating several tasks at once (e.g.
- * splitting a list into 6) blew past that and failed. This retries on HTTP 429
- * (rate_limited) with backoff, honoring Notion's Retry-After header, so bulk
- * writes succeed instead of erroring.
+ * Notion allows only ~3 requests/second, and creating several tasks at once
+ * (e.g. splitting a list into 6, each of which writes a page + relations) blew
+ * past that. Retrying after a 429 wasn't enough because many calls collided.
+ *
+ * So we do two things:
+ *  1) THROTTLE — every Notion call goes through one global serial queue that
+ *     spaces calls ~400ms apart (~2.5/s), staying safely under the limit so we
+ *     rarely hit 429 at all.
+ *  2) RETRY — anything that still 429s is retried with backoff (honoring
+ *     Retry-After) as a backstop.
  */
+const MIN_INTERVAL_MS = 400;
+let notionChain: Promise<void> = Promise.resolve();
+let lastCallAt = 0;
+
+/** Wait our turn in the global serial queue, spaced by MIN_INTERVAL_MS. */
+function throttle(): Promise<void> {
+  const mine = notionChain.then(async () => {
+    const wait = Math.max(0, lastCallAt + MIN_INTERVAL_MS - Date.now());
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    lastCallAt = Date.now();
+  });
+  notionChain = mine.catch(() => {});
+  return mine;
+}
+
 export async function withNotionRetry<T>(fn: () => Promise<T>, label = "notion"): Promise<T> {
   const MAX_ATTEMPTS = 6;
   for (let attempt = 0; ; attempt++) {
+    await throttle();
     try {
       return await fn();
     } catch (err) {
@@ -29,7 +51,7 @@ export async function withNotionRetry<T>(fn: () => Promise<T>, label = "notion")
       const rateLimited = e?.code === "rate_limited" || e?.status === 429;
       if (!rateLimited || attempt >= MAX_ATTEMPTS - 1) throw err;
       const retryAfter = Number(e?.headers?.["retry-after"]);
-      const waitMs = retryAfter > 0 ? retryAfter * 1000 : Math.min(500 * 2 ** attempt, 8000);
+      const waitMs = retryAfter > 0 ? retryAfter * 1000 : Math.min(600 * 2 ** attempt, 10000);
       logger.warn("notion rate-limited, backing off", { label, attempt, waitMs });
       await new Promise((r) => setTimeout(r, waitMs));
     }

@@ -126,18 +126,31 @@ async function createMessage(
   messages: Anthropic.MessageParam[]
 ): Promise<Anthropic.Message> {
   let res: Anthropic.Message | undefined;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    // On the last attempt, nudge the model explicitly — a fresh instruction
+    // often unsticks a degenerate empty state.
+    const msgs =
+      attempt === 3
+        ? [...messages, { role: "user" as const, content: "Please respond to my last message." }]
+        : messages;
+
     res = await anthropic.messages.create({
       model: config.CLAUDE_AGENT_MODEL,
-      max_tokens: 1024,
+      max_tokens: 2048,
       system,
       tools: TOOLS,
-      messages,
+      messages: msgs,
     });
     const hasText = res.content.some((b) => b.type === "text" && b.text.trim().length > 0);
     const hasTool = res.content.some((b) => b.type === "tool_use");
     if (hasText || hasTool) return res;
-    logger.warn("empty model response, retrying", { attempt });
+
+    logger.warn("empty model response, retrying", {
+      attempt,
+      stopReason: res.stop_reason,
+      blockTypes: res.content.map((b) => b.type),
+      messageCount: messages.length,
+    });
     await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
   }
   return res!;

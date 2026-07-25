@@ -55,7 +55,10 @@ export async function buildServer() {
     // ffmpeg is required to split voice notes over Sarvam's 30s limit.
     const { spawnSync } = await import("node:child_process");
     const ffmpeg = spawnSync("ffmpeg", ["-version"]).status === 0 ? "up" : "missing";
-    return { ok: true, db, ffmpeg, tz: config.TIMEZONE };
+    // Which commit is actually running (Railway injects the SHA) — so deploys
+    // can be verified rather than assumed.
+    const commit = (process.env.RAILWAY_GIT_COMMIT_SHA ?? "unknown").slice(0, 7);
+    return { ok: true, db, ffmpeg, commit, tz: config.TIMEZONE };
   });
 
   // Privacy policy — Meta requires a valid Privacy Policy URL to take the app
