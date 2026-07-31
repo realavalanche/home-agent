@@ -47,7 +47,13 @@ let boss: PgBoss | undefined;
 export async function getBoss(): Promise<PgBoss> {
   if (boss) return boss;
   const instance = new PgBoss({ connectionString: config.DATABASE_URL });
-  instance.on("error", (err: unknown) => logger.error("pg-boss error", { err: String(err) }));
+  instance.on("error", (err: unknown) => {
+    // A pg-boss error is usually a dropped DB connection. In the past this left
+    // the message-processing worker silently dead for a day. Fail fast so Railway
+    // restarts us with a fresh, polling worker instead of limping along.
+    logger.error("pg-boss error — exiting to force a clean restart", { err: String(err) });
+    process.exit(1);
+  });
   await instance.start();
   await Promise.all(Object.values(QUEUES).map((q) => instance.createQueue(q)));
   boss = instance;
