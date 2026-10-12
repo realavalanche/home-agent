@@ -118,23 +118,24 @@ npm run test:webhook -- "Idea: plan a Goa trip in December, book flights and a v
 docker compose up -d db && npm run dev
 ```
 
-## Deploy command (Fly.io)
+## Deploy (Railway)
 
-```bash
-fly launch --no-deploy                 # uses fly.toml (region bom / Mumbai)
-fly postgres create                    # then: fly postgres attach <db-app>   (sets DATABASE_URL)
-fly secrets set \
-  WHATSAPP_PHONE_NUMBER_ID=… WHATSAPP_ACCESS_TOKEN=… WHATSAPP_APP_SECRET=… WHATSAPP_VERIFY_TOKEN=… \
-  NOTION_TOKEN=… NOTION_PARENT_PAGE_ID=… NOTION_DB_CAPTURES=… NOTION_DS_CAPTURES=… \
-  NOTION_DB_TASKS=… NOTION_DS_TASKS=… NOTION_DB_WEEKLY=… NOTION_DS_WEEKLY=… \
-  GOOGLE_CLIENT_ID=… GOOGLE_CLIENT_SECRET=… GOOGLE_REDIRECT_URI=… \
-  ANTHROPIC_API_KEY=… SARVAM_API_KEY=… VOYAGE_API_KEY=… \
-  PUBLIC_BASE_URL=https://home-agent.fly.dev USER_A_NAME=… USER_A_WHATSAPP=… USER_B_NAME=… USER_B_WHATSAPP=…
-fly deploy                             # migrations run automatically on boot
-```
+Production runs on Railway, project **Home Agent**, environment `production`:
 
-Then point the Meta webhook + Google redirect URI at `https://home-agent.fly.dev`.
-(The Docker image is host-agnostic — Railway / Render / a VPS work the same way; just provide a
+- `home-agent` — this repo, built from the `Dockerfile` (see `railway.json`). Migrations run
+  automatically on boot and retry while Postgres is unreachable.
+- `pgvector` — pgvector-enabled Postgres; its `DATABASE_URL` is referenced by `home-agent`.
+
+Env vars are set on the `home-agent` service in Railway (same keys as `.env.example`). Public URL:
+`https://home-agent-production-745d.up.railway.app` — the Meta webhook and Google redirect URI point
+there. Check `/health` after a deploy; it reports the running commit.
+
+`railway.json` sets `restartPolicyType: ALWAYS`. The process deliberately exits on a pg-boss error
+(see `src/queue.ts`), so a capped restart policy can leave the service permanently down — that is
+what happened on 2026-08-13. Keep an external uptime monitor on `/health`: when the app is down,
+WhatsApp messages simply go unanswered, and nothing inside the app can alert you.
+
+(The Docker image is host-agnostic — Fly / Render / a VPS work the same way; just provide a
 pgvector-enabled Postgres and set the same env vars.)
 
 ---
