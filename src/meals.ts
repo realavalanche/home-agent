@@ -3,8 +3,7 @@ import type { AuthorKey } from "./users.js";
 
 /**
  * Shared meal planning. One partner proposes a day's meals; the other confirms.
- * Dinner defaults to lunch (they usually eat the same). The 3pm check-in only
- * asks about a date that isn't already settled.
+ * Dinner defaults to lunch (they usually eat the same).
  */
 
 export interface MealPlan {

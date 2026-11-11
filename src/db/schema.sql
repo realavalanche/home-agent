@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS keepalive_pings (
 
 -- Shared meal plan, one row per date. Dinner defaults to lunch unless set.
 -- A plan is 'proposed' by one partner and becomes 'confirmed' once the other
--- agrees — the 3pm check-in only asks when a date isn't settled yet.
+-- agrees.
 CREATE TABLE IF NOT EXISTS meal_plans (
   plan_date    DATE PRIMARY KEY,
   breakfast    TEXT,

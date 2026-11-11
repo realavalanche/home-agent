@@ -11,7 +11,6 @@ import type { AuthorKey } from "../users.js";
 import { runWeeklyReview } from "./weekly-review.js";
 import { runMorningBriefing } from "./morning-briefing.js";
 import { runNotionSync } from "./notion-sync.js";
-import { runMealCheckin } from "./meal-checkin.js";
 import { runKeepalive } from "./keepalive.js";
 import { allUsers, getUser } from "../users.js";
 
@@ -55,11 +54,10 @@ export async function startScheduler(): Promise<void> {
   });
   await boss.schedule(QUEUES.NOTION_SYNC, "*/20 * * * *", {}, { tz: config.TIMEZONE, key: "notion-sync" });
 
-  // 6) Meal check-in for tomorrow, daily at 15:00 IST (skips if already settled).
-  await boss.work(QUEUES.MEAL_CHECKIN, async () => {
-    await runMealCheckin();
-  });
-  await boss.schedule(QUEUES.MEAL_CHECKIN, "0 15 * * *", {}, { tz: config.TIMEZONE, key: "meal-checkin" });
+  // 6) The daily 3pm meal check-in was retired — meals are planned only when a
+  //    user brings them up. pg-boss crons persist in the DB, so unschedule it
+  //    explicitly or it would keep firing.
+  await boss.unschedule(QUEUES.MEAL_CHECKIN, "meal-checkin").catch(() => {});
 
   // 7) Hourly keep-alive: ping before WhatsApp's 24h window closes, so the
   //    briefings/reminders never get silently blocked.
@@ -83,13 +81,9 @@ export async function startScheduler(): Promise<void> {
 
   // pg-boss cron is UTC unless tz is given; we pin it to the app timezone.
   for (const user of allUsers()) {
-    // Sunday 21:00 IST → each partner's own weekly review.
-    await boss.schedule(
-      QUEUES.WEEKLY,
-      "0 21 * * 0",
-      { authorKey: user.key } satisfies WeeklyJob,
-      { tz: config.TIMEZONE, key: `weekly-${user.key}` }
-    );
+    // The Sunday 9pm weekly review was retired. Crons persist in the DB, so
+    // unschedule explicitly. (Still runnable on demand via /admin/trigger.)
+    await boss.unschedule(QUEUES.WEEKLY, `weekly-${user.key}`).catch(() => {});
     // Daily good-morning briefing at 06:30 IST — only for opted-in users.
     if (morningUsers.has(user.key)) {
       await boss.schedule(

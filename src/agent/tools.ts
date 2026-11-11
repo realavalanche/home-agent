@@ -45,7 +45,6 @@ import { buildImmunizationSchedule } from "../family.js";
 import { placeCall, callingEnabled, INSTRUCTIONS, GREETINGS } from "../call.js";
 import { allUsers } from "../users.js";
 import { proposeMealPlan, confirmMealPlan, getMealPlans, describePlan } from "../meals.js";
-import { notifyPartnerOfPlan } from "../scheduler/meal-checkin.js";
 import { query } from "../db/pool.js";
 import { DateTime } from "luxon";
 
@@ -170,7 +169,7 @@ export const TOOLS: Anthropic.Tool[] = [
   {
     name: "set_meal_plan",
     description:
-      "Record the meal plan for a date (breakfast, lunch sabzi, optionally dinner). Dinner defaults to the same as lunch. Automatically shares it with the partner to confirm. Call once PER DATE if planning several days.",
+      "Record the meal plan for a date (breakfast, lunch sabzi, optionally dinner). Dinner defaults to the same as lunch. Does NOT message the partner. Call once PER DATE if planning several days.",
     input_schema: {
       type: "object",
       properties: {
@@ -185,7 +184,7 @@ export const TOOLS: Anthropic.Tool[] = [
   {
     name: "confirm_meal_plan",
     description:
-      "The user agrees with the meal plan their partner proposed for a date ('ok', 'sounds good', 'yes'). Settles it so the 3pm check-in stops asking.",
+      "The user agrees with the meal plan their partner proposed for a date ('ok', 'sounds good', 'yes'). Settles it.",
     input_schema: {
       type: "object",
       properties: { date_iso: { type: "string", description: "yyyy-mm-dd" } },
@@ -691,9 +690,7 @@ async function handleSetMealPlan(input: Json, ctx: AgentContext): Promise<string
     lunch: str(input, "lunch"),
     dinner: str(input, "dinner"),
   });
-  // Share it with the partner so they can agree (that's what settles it).
-  await notifyPartnerOfPlan(ctx.user.key, date).catch(() => {});
-  return `Saved for ${date}: ${describePlan(plan)}. I've shared it with your partner to confirm.`;
+  return `Saved for ${date}: ${describePlan(plan)}.`;
 }
 
 async function handleConfirmMealPlan(input: Json, ctx: AgentContext): Promise<string> {
