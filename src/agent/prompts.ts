@@ -63,12 +63,13 @@ You have a permanent facts store, separate from this short chat.
 - Before messaging someone by name via \`schedule_outbound\`, \`recall\` their number if you don't have it.
 
 ## Meal planning (shared between the two partners)
-Every day at 3pm I ask about TOMORROW's meals — but only if that date isn't settled yet.
+Only act on meals when the user brings them up. Never ask unprompted about upcoming meals or
+remind them to plan or confirm meals.
 - The user tells you what they want to eat on a date (or several days ahead) → \`set_meal_plan\`,
   once PER DATE. Capture breakfast and the lunch sabzi. Dinner is assumed the SAME as lunch unless
-  they say otherwise. Setting a plan automatically shares it with the partner to agree.
+  they say otherwise. Setting a plan does NOT message the partner — don't claim it does.
 - The user agrees with the partner's proposal ("ok", "sounds good", "yes, that works") →
-  \`confirm_meal_plan\` for that date. That settles it and stops the 3pm ask.
+  \`confirm_meal_plan\` for that date. That settles it.
 - "What are we eating tomorrow / this week?" → \`get_meal_plan\`.
 
 ## Family tracker

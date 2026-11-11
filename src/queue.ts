@@ -10,10 +10,10 @@ import type { AuthorKey } from "./users.js";
 export const QUEUES = {
   INGEST: "ingest", // process one inbound WhatsApp message end-to-end
   SEND: "send-message", // fire a scheduled outbound/reminder WhatsApp message
-  WEEKLY: "weekly-review", // Sunday 9pm IST per-user AI review
+  WEEKLY: "weekly-review", // per-user AI review — on demand only (Sunday cron retired)
   MORNING: "morning-briefing", // 6:30am IST per-user good-morning + overdue
   NOTION_SYNC: "notion-sync", // reconcile the Postgres index with Notion edits/deletes
-  MEAL_CHECKIN: "meal-checkin", // 3pm IST: settle tomorrow's meals if not already planned
+  MEAL_CHECKIN: "meal-checkin", // retired 3pm meal check-in; kept only so boot can unschedule it
   KEEPALIVE: "keepalive", // hourly: ping before WhatsApp's 24h window closes
   ESCALATE: "escalate", // urgent reminder unread after 30min -> phone call
 } as const;

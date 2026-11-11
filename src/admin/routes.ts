@@ -9,7 +9,7 @@ import type { AuthorKey } from "../users.js";
  * secret as the webhook verify token, so it isn't publicly runnable.
  *
  *   POST /admin/run?job=weekly&user=B&token=…
- *   jobs: weekly | morning | meal | notion-sync
+ *   jobs: weekly | morning | notion-sync | keepalive | expire-confirmations
  */
 export async function registerAdminRoutes(app: FastifyInstance) {
   /** Inspect recent voice calls — did we actually place one, and what happened? */
@@ -146,11 +146,6 @@ export async function registerAdminRoutes(app: FastifyInstance) {
           await runMorningBriefing(user);
           return { ok: true, ran: "morning-briefing", user };
         }
-        case "meal": {
-          const { runMealCheckin } = await import("../scheduler/meal-checkin.js");
-          await runMealCheckin();
-          return { ok: true, ran: "meal-checkin" };
-        }
         case "notion-sync": {
           const { runNotionSync } = await import("../scheduler/notion-sync.js");
           await runNotionSync();
@@ -169,7 +164,7 @@ export async function registerAdminRoutes(app: FastifyInstance) {
         default:
           return reply
             .code(400)
-            .send({ ok: false, error: "unknown job", jobs: ["weekly", "morning", "meal", "notion-sync"] });
+            .send({ ok: false, error: "unknown job", jobs: ["weekly", "morning", "notion-sync", "keepalive", "expire-confirmations"] });
       }
     } catch (err) {
       logger.error("admin trigger failed", { job, user, err: String(err) });
