@@ -74,28 +74,12 @@ export async function startScheduler(): Promise<void> {
   // Remove the short-lived household schedule; the review is per-person again.
   await boss.unschedule(QUEUES.WEEKLY, "weekly-household").catch(() => {});
 
-  // Who receives the 6:30am morning briefing (the rest are opted out).
-  const morningUsers = new Set(
-    config.MORNING_BRIEFING_USERS.split(",").map((s) => s.trim()).filter(Boolean)
-  );
-
-  // pg-boss cron is UTC unless tz is given; we pin it to the app timezone.
   for (const user of allUsers()) {
-    // The Sunday 9pm weekly review was retired. Crons persist in the DB, so
-    // unschedule explicitly. (Still runnable on demand via /admin/trigger.)
+    // The Sunday 9pm weekly review and the 6:30am morning briefing were retired.
+    // Crons persist in the DB, so unschedule explicitly. (Both are still
+    // runnable on demand via /admin/trigger.)
     await boss.unschedule(QUEUES.WEEKLY, `weekly-${user.key}`).catch(() => {});
-    // Daily good-morning briefing at 06:30 IST — only for opted-in users.
-    if (morningUsers.has(user.key)) {
-      await boss.schedule(
-        QUEUES.MORNING,
-        "30 6 * * *",
-        { authorKey: user.key } satisfies WeeklyJob,
-        { tz: config.TIMEZONE, key: `morning-${user.key}` }
-      );
-    } else {
-      // Remove any previously-registered schedule for an opted-out user.
-      await boss.unschedule(QUEUES.MORNING, `morning-${user.key}`).catch(() => {});
-    }
+    await boss.unschedule(QUEUES.MORNING, `morning-${user.key}`).catch(() => {});
   }
 
   logger.info("scheduler + workers started", { tz: config.TIMEZONE });

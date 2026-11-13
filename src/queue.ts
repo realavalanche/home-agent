@@ -11,7 +11,7 @@ export const QUEUES = {
   INGEST: "ingest", // process one inbound WhatsApp message end-to-end
   SEND: "send-message", // fire a scheduled outbound/reminder WhatsApp message
   WEEKLY: "weekly-review", // per-user AI review — on demand only (Sunday cron retired)
-  MORNING: "morning-briefing", // 6:30am IST per-user good-morning + overdue
+  MORNING: "morning-briefing", // per-user good-morning — on demand only (6:30am cron retired)
   NOTION_SYNC: "notion-sync", // reconcile the Postgres index with Notion edits/deletes
   MEAL_CHECKIN: "meal-checkin", // retired 3pm meal check-in; kept only so boot can unschedule it
   KEEPALIVE: "keepalive", // hourly: ping before WhatsApp's 24h window closes

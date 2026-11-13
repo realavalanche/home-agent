@@ -4,7 +4,7 @@ import { pingOnce } from "../scheduler/keepalive.js";
 import type { User } from "../users.js";
 
 /**
- * Send a business-INITIATED message (morning briefing, meal check-in, reminder).
+ * Send a business-INITIATED message (e.g. a reminder).
  *
  * WhatsApp only allows free-form text within 24 hours of the user's last message.
  * The hourly keep-alive normally pings them BEFORE that window closes, so it stays
